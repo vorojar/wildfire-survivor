@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUp, Compass, Crown, Music2, Sparkles, X, Shield, Crosshair, Orbit, ChevronRight } from 'lucide-react';
+import { ArrowUp, Compass, Crown, Music2, Sparkles, X, Shield, Crosshair, Orbit, ChevronRight, Heart } from 'lucide-react';
 import { atlasRects, BIOME_LENGTH, distanceAt } from './world.js';
 import { musicModes } from './audio.js';
 
@@ -51,8 +51,8 @@ export function AudioPanel({ audio, mode, status, onRetry, onPreview, onChange, 
   </section>;
 }
 export function RelicModal({ game, refresh }) {
-  const icons = { hunter: Crosshair, guardian: Shield, reactor: Orbit };
-  return <div className="overlay relic-overlay" onPointerDown={e => e.stopPropagation()}><div className="upgrade-modal"><span className="level-burst"><Crown size={32}/></span><h2>首领已击破</h2><p>获得一枚稀有核心，选择你的战利品。</p><div className="upgrade-options">{game.choices.map(r => { const Icon = icons[r.id]; return <button key={r.id} onClick={() => { game.chooseRelic(r.id); refresh(); }}><span className="upgrade-icon"><Icon size={27}/></span><span><small>{r.tag}</small><b>{r.name}</b><em>{r.desc}</em></span><ChevronRight size={18}/></button>; })}</div><small className="muted">封锁解除 · 继续向北，下一片荒野等待着你</small></div></div>;
+  const icons = { Crosshair, Shield, Orbit, Heart };
+  return <div className="overlay relic-overlay" onPointerDown={e => e.stopPropagation()}><div className="upgrade-modal"><span className="level-burst"><AtlasSprite index={game.lastBoss.art}/></span><h2>{game.lastBoss.name}的遗藏</h2><p>金币雨 +{game.lastBoss.gold} · 补给与经验已回收{game.lastBoss.life?' · 获得复苏之心':''}<br/>第 {game.bossKills} 次首领战 · 选择一件本局遗物</p><div className="upgrade-options">{game.choices.map(r => { const Icon = icons[r.icon]; return <button key={r.id} onClick={() => { game.chooseRelic(r.id); refresh(); }}><span className="upgrade-icon"><Icon size={27}/></span><span><small>{r.tag}</small><b>{r.name}</b><em>{r.desc}</em></span><ChevronRight size={18}/></button>; })}</div><small className="muted">本次奖励已保存 · 封锁解除，继续远征</small></div></div>;
 }
 export function JourneyStats({ game }) {
   const remaining = BIOME_LENGTH - distanceAt(game.p.y) % BIOME_LENGTH;

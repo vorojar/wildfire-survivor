@@ -98,7 +98,7 @@ export class Sound {
   }
   update(game) {
     if (!this.ctx || this.ctx.state !== 'running' || this.disposed) return;
-    const now = this.ctx.currentTime, running = this.enabled && game.state === 'playing';
+    const now = this.ctx.currentTime, running = this.enabled && ['playing','loot'].includes(game.state);
     this.mode = game.musicMode;
     const mix = musicModes[this.mode], volume = running ? this.musicVolume * mix.level : 0;
     if (this.lastVolume !== volume) { this.musicBus.gain.setTargetAtTime(volume, now, .18); this.lastVolume = volume; }
@@ -133,7 +133,7 @@ export class Sound {
       if (big) this.duck(now, true); return;
     }
     if (type === 'hurt') { this.noiseBurst(now, .16, .18, 700); this.tone(110, now, .12, .09, 'triangle', this.fxBus, 55); return; }
-    if (['evolution', 'victory', 'level'].includes(type)) { [0, 7, 12].forEach((n, i) => this.tone(noteHz(57 + n), now + i * .08, .22, .065, 'triangle')); return; }
+    if (['evolution', 'victory', 'level', 'revive', 'life'].includes(type)) { [0, 7, 12].forEach((n, i) => this.tone(noteHz(57 + n), now + i * .08, .22, .065, 'triangle')); return; }
     const frequencies = { coin: 1850, choose: 740, combo: 930, warning: 480, supply: 880, pickup: 1250, shield: 560 };
     const f = frequencies[type]; if (!f) return;
     this.tone(f, now, type === 'warning' ? .28 : .08, type === 'coin' ? .018 : .055, 'sine', this.fxBus, f * .7);

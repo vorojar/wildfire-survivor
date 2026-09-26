@@ -6,6 +6,7 @@ export const lootTypes = {
   haste: { art: 4, name: '狂热弹药', color: '#ffc283' },
   shield: { art: 5, name: '能量护盾', color: '#8adfea' },
   chest: { art: 6, name: '荒野宝箱', color: '#f2d485' },
+  life: { name: '复苏之心', color: '#ff8cb3' },
 };
 export function rollLoot(roll = Math.random()) {
   if (roll < .045) return 'heal';

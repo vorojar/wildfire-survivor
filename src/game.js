@@ -1,5 +1,5 @@
 import { W, H, ORIGIN_Y, World, distanceAt, biomeAt } from './world.js';
-import { bossTypes, relics, updateBoss, updateHazards } from './bosses.js';
+import { bossTypes, bossRewards, updateBoss, updateHazards } from './bosses.js';
 import { enemyTypes, enemyForZone, updateEnemy } from './enemies.js';
 import { lootTypes, rollLoot } from './loot.js';
 export { enemyTypes } from './enemies.js';
@@ -31,6 +31,7 @@ export class Game {
   constructor({ onEvent = () => {}, hero = 0, gear = [0, 0, 0, 0] } = {}) {
     this.onEvent = onEvent; this.hero = hero; this.gear = [...gear];
     this.state = 'ready'; this.time = 0; this.kills = 0; this.coins = 0; this.level = 1; this.xp = 0; this.nextXp = 22; this.threatGrowth = 1;
+    this.lives = 3; this.revives = 0; this.lootTimer = 0; this.lastBoss = null; this.lifeDryStreak = 0;
     this.p = { x: W / 2, y: ORIGIN_Y, hp: 120 + gear[1] * 20, maxHp: 120 + gear[1] * 20, speed: 150 + gear[2] * 10, invuln: 0, face: 1 };
     this.damage = (hero ? 22 : 18) + gear[0] * 4; this.interval = hero ? .27 : .21;
     this.multi = 1; this.pierce = 0; this.magnet = 130 + gear[3] * 15; this.orbits = 0; this.novaPower = 1; this.crit = .16;
@@ -103,19 +104,50 @@ export class Game {
   }
   finishBoss(boss) {
     this.bossKills++; this.boss = null; this.bossGate = null; this.autoAdvance = false;
+    this.enemies=this.enemies.filter(e=>e.hp>0 && e!==boss);
     this.hazards = this.hazards.filter(h => h.owner !== boss.id); this.enemyShots = this.enemyShots.filter(b => b.owner !== boss.id);
     this.nextBossDistance = Math.max(this.nextBossDistance + 380, this.distance + 180); this.nextBossTime = this.time + 75;
-    this.state = 'relic'; this.choices = relics.map(r => ({ ...r })); this.onEvent('victory', boss.name);
+    this.lastBoss = { name: boss.name, art: boss.art, color: boss.color, gold: 0, life: false };
+    const drops = [];
+    for(let i=0;i<36;i++) drops.push(['coin', 3+Math.floor(this.distance/400)]);
+    for(let i=0;i<12;i++) drops.push(['xp', 2]);
+    drops.push(['chest',1],['heal',35],['magnet',1],['haste',1],['shield',1]);
+    this.lifeDryStreak++;
+    if(this.lives<5 && (Math.random()<.4 || this.lifeDryStreak>=3)) { drops.push(['life',1]); this.lastBoss.life=true; this.lifeDryStreak=0; }
+    drops.forEach(([type,value],i) => {
+      const angle=i*2.39996, speed=rand(200,500);
+      this.drop(boss.x,boss.y,value,type);
+      Object.assign(this.drops.at(-1), { bossLoot:true, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed });
+      if(type==='coin')this.lastBoss.gold+=value;
+    });
+    this.burst(boss.x,boss.y,'#ffd77e',90);this.shake=12;
+    this.rings.push({x:boss.x,y:boss.y,r:12,life:1.4,color:'#ffe4a6'});
+    this.state = 'loot'; this.lootTimer = 3; this.choices = bossRewards(this,boss); this.onEvent('victory', boss.name);
   }
   chooseRelic(id) {
     if (this.state !== 'relic' || !this.choices.some(c => c.id === id)) return false;
     if (id === 'hunter') { this.damage *= 1.2; this.crit = Math.min(.8, this.crit + .08); }
     if (id === 'guardian') { this.p.maxHp += 40; this.p.hp = this.p.maxHp; }
     if (id === 'reactor') { this.novaPower += .5; this.novaCooldown = 0; this.orbits = Math.min(5, this.orbits + 1); }
+    if (id === 'bulwark') { this.p.maxHp += 60; this.p.hp = this.p.maxHp; }
+    if (id === 'spore') { this.magnet += 100; this.damage *= 1.15; }
+    if (id === 'wing') { this.p.speed = Math.min(320,this.p.speed+20); this.interval = Math.max(.065,this.interval*.86); }
+    if (id === 'phoenix') { this.lives = Math.min(5,this.lives+1); this.p.hp = this.p.maxHp; }
+    if (id === 'barrage') { this.multi = Math.min(7,this.multi+1); this.pierce++; }
     this.relics.push(id); if (this.relics.length > 100) this.relics.shift();
     this.choices = []; this.state = 'playing'; this.p.invuln = 2; this.onEvent('choose'); return true;
   }
   pause() { if (this.state === 'playing') this.state = 'paused'; else if (this.state === 'paused') this.state = 'playing'; }
+  resolveDeath() {
+    if(this.p.hp>0 || this.state==='dead')return;
+    this.lives--;this.autoAdvance=false;
+    if(this.lives===0){this.state='dead';this.onEvent('dead');return;}
+    this.revives++;this.p.hp=this.p.maxHp;this.p.invuln=4;
+    this.enemyShots=[];this.hazards=[];
+    for(const e of this.enemies){const dx=e.x-this.p.x,dy=e.y-this.p.y,d=Math.hypot(dx,dy);if(d<180&&!e.isBoss){e.x=clamp(this.p.x+(dx/(d||1)||1)*210,25,W-25);e.y=this.p.y+(dy/(d||1))*210;}e.dash=null;}
+    this.rings.push({x:this.p.x,y:this.p.y,r:5,life:1.2,color:'#ff97bf'});this.burst(this.p.x,this.p.y,'#ffb7d1',45);
+    this.onEvent('revive',this.lives);
+  }
   burst(x, y, color, n = 9) {
     for (let i = 0; i < n; i++) { const a = rand(0, Math.PI * 2), s = rand(30, 170); this.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(.2, .6), color, size: rand(2, 5) }); }
   }
@@ -140,14 +172,14 @@ export class Game {
     this.burst(e.x, e.y, e.color, 3);
     if (e.hp > 0) return;
     this.kills++; this.combo++; this.comboClock = 2; this.onEvent('kill'); this.burst(e.x, e.y, e.color, e.type === 3 ? 35 : 12);
-    const n = e.isBoss ? 22 : e.type === 3 ? 10 : e.type === 2 ? 3 : 1;
+    if (e.isBoss) { this.finishBoss(e); return; }
+    const n = e.type === 3 ? 10 : e.type === 2 ? 3 : 1;
     for (let i = 0; i < n; i++) this.drop(e.x + rand(-20, 20), e.y + rand(-20, 20), (e.type === 3 ? 3 : 1) + Math.floor(this.distance / 600));
     this.drop(e.x,e.y,e.isBoss?24:e.type===3?6:e.splitChild?.5:e.type===2?2:1,'xp');
     const loot=e.isBoss?'chest':rollLoot();if(loot)this.drop(e.x+18,e.y,loot==='heal'?35:1,loot);
     if(e.behavior==='split'&&!e.splitChild){for(let i=0;i<2;i++){const child=this.spawn(e.type,e.x+(i?20:-20),e.y+10);child.hp=child.maxHp=e.maxHp*.25;child.size=30;child.speed*=1.8;child.splitChild=true;}}
     if(!e.isBoss)this.hazards=this.hazards.filter(h=>h.owner!==e.id);
     if (this.combo % 10 === 0) { this.onEvent('combo', this.combo); this.shake = 4; }
-    if (e.isBoss) this.finishBoss(e);
   }
   nova() {
     if (this.state !== 'playing' || this.novaCooldown > 0) return false;
@@ -211,6 +243,10 @@ export class Game {
     }
   }
   update(dt, input = { x: 0, y: 0 }) {
+    if(this.state==='loot'){
+      dt=clamp(dt,0,.05);this.lootTimer-=dt;this.collectDrops(dt);this.updateEffects(dt);
+      if(this.lootTimer<=0){this.state='relic';this.onEvent('reward');}return;
+    }
     if (this.state !== 'playing') return;
     dt = Math.max(0, Math.min(dt, .05)); this.time += dt; const p = this.p;
     this.threatGrowth += (this.targetThreatGrowth - this.threatGrowth) * (1-Math.exp(-dt/18));
@@ -270,19 +306,24 @@ export class Game {
       }
     }
     this.bullets = this.bullets.filter(b => b.life > 0 && b.x > -40 && b.x < W + 40 && Math.abs(b.y - p.y) < 900);
-    this.enemies = this.enemies.filter(e => e.hp > 0 && (e.isBoss || Math.abs(e.y - p.y) < 1000)); this.collectDrops(dt);
+    this.enemies = this.enemies.filter(e => e.hp > 0 && (e.isBoss || Math.abs(e.y - p.y) < 1000));
+    this.resolveDeath();if(this.state==='dead')return;this.collectDrops(dt);this.updateEffects(dt);this.checkLevel();
+  }
+  updateEffects(dt) {
+    this.shake=Math.max(0,this.shake-dt*20);
     for (const a of this.particles) { a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt; a.vx *= .96; a.vy *= .96; } this.particles = this.particles.filter(a => a.life > 0).slice(-500);
     for (const t of this.texts) { t.y -= dt * 35; t.life -= dt; } this.texts = this.texts.filter(t => t.life > 0).slice(-80);
     for (const r of this.rings) { r.r += dt * 460; r.life -= dt; } this.rings = this.rings.filter(r => r.life > 0);
     for (const arc of this.arcs) arc.life -= dt; this.arcs = this.arcs.filter(a => a.life > 0);
-    if (p.hp <= 0) { this.state = 'dead'; this.autoAdvance = false; this.onEvent('dead'); } else this.checkLevel();
   }
   collectDrops(dt) {
     let collected = 0; const p = this.p, picked=[];
     this.drops = this.drops.filter(d => {
+      if(d.bossLoot){d.x=clamp(d.x+(d.vx||0)*dt,22,W-22);d.y+=(d.vy||0)*dt;d.vx*=Math.exp(-dt*2.4);d.vy*=Math.exp(-dt*2.4);}
       const dist = Math.hypot(d.x - p.x, d.y - p.y); d.age = (d.age ?? 0) + dt;
+      if(d.bossLoot&&d.age<.9)return true;
       const common=d.type==='coin'||d.type==='xp';
-      if (dist < (common?this.magnet:this.magnet*.55) || (common&&(d.age>7||this.buffs.magnet>0))) { const travel = Math.min(dist, (this.buffs.magnet>0?950:340 + 180 * Math.max(0, 1 - dist / this.magnet)) * dt); d.x += (p.x - d.x) / (dist || 1) * travel; d.y += (p.y - d.y) / (dist || 1) * travel; }
+      if (d.bossLoot || dist < (common?this.magnet:this.magnet*.55) || (common&&(d.age>7||this.buffs.magnet>0))) { const travel = Math.min(dist, (d.bossLoot?800:this.buffs.magnet>0?950:340 + 180 * Math.max(0, 1 - dist / this.magnet)) * dt); d.x += (p.x - d.x) / (dist || 1) * travel; d.y += (p.y - d.y) / (dist || 1) * travel; }
       if (Math.hypot(d.x - p.x, d.y - p.y) < 22) {
         picked.push(d);return false;
       }
@@ -293,6 +334,7 @@ export class Game {
       if(d.type==='coin'){this.coins+=d.value;collected+=d.value;continue;}
       if(d.type==='xp'){this.xp+=d.value;continue;}
       if(d.type==='heal')p.hp=Math.min(p.maxHp,p.hp+d.value);
+      if(d.type==='life'){this.lives=Math.min(5,this.lives+1);this.onEvent('life',this.lives);}
       if(d.type==='magnet')this.buffs.magnet=10;
       if(d.type==='haste')this.buffs.haste=12;
       if(d.type==='shield'){this.buffs.shield=18;this.shieldCharges=3;}

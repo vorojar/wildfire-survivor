@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Game,W,H} from './game.js';
+import {captureRun,restoreRun,writeProgress} from './run-save.js';
+import {bossRewards} from './bosses.js';
 import { World, ORIGIN_Y, distanceAt, biomeAt, biomeBlendAt } from './world.js';
 import { enemyForZone, updateEnemy } from './enemies.js';
 import { bossTypes, updateBoss, updateHazards, hazardContains } from './bosses.js';
@@ -32,19 +34,73 @@ test('pause freezes simulation and nova has a real cooldown',()=>{
   g.pause();const time=g.time,cooldown=g.novaCooldown;g.update(.05);assert.equal(g.time,time);assert.equal(g.novaCooldown,cooldown);g.pause();g.update(.05);assert.ok(g.novaCooldown<cooldown);
 });
 test('lethal contact ends run and new game resets run while respecting permanent equipment',()=>{
-  const g=new Game({gear:[2,3,1,2]});assert.equal(g.damage,26);assert.equal(g.p.maxHp,180);g.start();g.p.hp=1;g.spawn(3,g.p.x,g.p.y);g.shootClock=100;g.update(.01);assert.equal(g.state,'dead');assert.equal(g.p.hp,0);
+  const g=new Game({gear:[2,3,1,2]});assert.equal(g.damage,26);assert.equal(g.p.maxHp,180);g.start();g.lives=1;g.p.hp=1;g.spawn(3,g.p.x,g.p.y);g.shootClock=100;g.update(.01);assert.equal(g.state,'dead');assert.equal(g.p.hp,0);
   const next=new Game({gear:[2,3,1,2]});assert.equal(next.coins,0);assert.equal(next.level,1);assert.equal(next.p.hp,180);
 });
 test('a long expedition cycles all bosses and keeps world/combat memory bounded',(t)=>{
   let seed=42;t.mock.method(Math,'random',()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296));
   const g=new Game();g.start();g.p.maxHp=g.p.hp=1e9;g.damage=500;g.multi=7;g.pierce=3;g.magnet=1000;
   const bosses=new Set();g.onEvent=(t,name)=>{if(t==='boss')bosses.add(name);};
-  for(let i=0;i<12000;i++){if(g.state==='upgrade')g.choose(g.choices[0].id);if(g.state==='relic')g.chooseRelic('hunter');g.update(.05,{x:Math.sin(i/200)*.3,y:-1});if(i%240===0)g.nova();}
+  for(let i=0;i<12000;i++){if(g.state==='upgrade')g.choose(g.choices[0].id);if(g.state==='relic')g.chooseRelic(g.choices[0].id);g.update(.05,{x:Math.sin(i/200)*.3,y:-1});if(i%240===0)g.nova();}
   assert.equal(bosses.size,3);assert.ok(g.bossKills>=6);assert.ok(g.distance>3000);assert.ok(g.kills>500);assert.ok(g.bullets.length<500);assert.ok(g.particles.length<=500);assert.ok(g.drops.length<=500);assert.ok(g.world.chunks.size<=5);assert.ok(Number.isFinite(g.p.hp));
 });
 
 function isolated(){const g=new Game();g.start();g.enemies=[];g.spawnClock=1e6;g.nextBossTime=1e6;g.nextBossDistance=1e6;g.nextElite=1e6;return g;}
 function grant(g,id){g.state='upgrade';g.choices=[{id}];assert.equal(g.choose(id),true);}
+
+test('three lives revive twice in place with protection; the third death ends the run once',()=>{
+  const events=[],g=isolated();g.onEvent=(type)=>events.push(type);g.p.x=130;g.p.y=-1234;grant(g,'power');
+  const damage=g.damage;
+  for(const remaining of [2,1]){
+    g.p.hp=0;g.enemyShots=[{x:130,y:-1234}];g.hazards=[{}];g.resolveDeath();
+    assert.equal(g.lives,remaining);assert.equal(g.state,'playing');assert.equal(g.p.hp,g.p.maxHp);
+    assert.equal(g.p.x,130);assert.equal(g.p.y,-1234);assert.equal(g.damage,damage);
+    assert.equal(g.hurt(1e6),false);assert.equal(g.enemyShots.length,0);assert.equal(g.hazards.length,0);
+  }
+  g.p.hp=0;g.resolveDeath();g.resolveDeath();assert.equal(g.lives,0);assert.equal(g.state,'dead');
+  assert.equal(events.filter(e=>e==='revive').length,2);assert.equal(events.filter(e=>e==='dead').length,1);
+  assert.equal(captureRun(g),null);
+});
+
+test('boss loot scatters, is collected before rewards, and life drops have a dry-streak guarantee',(t)=>{
+  t.mock.method(Math,'random',()=>.99);
+  const g=isolated();g.lifeDryStreak=2;const b=g.spawnBoss();g.finishBoss(b);
+  assert.equal(g.state,'loot');assert.ok(g.drops.filter(d=>d.bossLoot).length>=54);
+  assert.ok(g.drops.some(d=>d.type==='life'));const coin=g.drops.find(d=>d.type==='coin'),x=coin.x;
+  g.update(.05);assert.notEqual(coin.x,x);assert.equal(g.coins,0);
+  for(let i=0;i<65;i++)g.update(.05);
+  assert.equal(g.state,'relic');assert.equal(g.lives,4);assert.ok(g.coins>=108);assert.equal(g.drops.filter(d=>d.bossLoot).length,0);
+  assert.equal(g.lifeDryStreak,0);assert.equal(g.choices[0].id,'bulwark');
+  const oldHp=g.p.maxHp;g.chooseRelic('bulwark');assert.equal(g.p.maxHp,oldHp+60);
+  g.lives=5;g.drop(g.p.x,g.p.y,1,'life');g.collectDrops(0);assert.equal(g.lives,5);
+  const sets=[0,1,2].map(bossType=>bossRewards(g,{bossType}).map(r=>r.id));
+  assert.deepEqual(sets.map(s=>s[0]),['bulwark','spore','wing']);assert.ok(sets.every(s=>!s.includes('phoenix')));
+});
+
+test('a complete expedition restores boss references, bullet hits, lives, world history and pending choices',()=>{
+  const g=isolated();g.p.y=-2500;g.world.update(g.p.y);g.world.collect(1);g.lives=2;
+  for(const id of ['power','power','speed','speed'])grant(g,id);
+  const b=g.spawnBoss();b.hp=b.maxHp*.3;b.phaseLevel=2;b.shieldTime=1.7;g.fire(0);g.bullets[0].hits.add(b.id);
+  g.drop(g.p.x+90,g.p.y,7,'coin');
+  const roundTrip=()=>restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g))));
+  const restored=roundTrip();assert.equal(restored.state,'paused');assert.equal(restored.weaponName,'炼狱加特林');
+  assert.equal(restored.lives,2);assert.equal(restored.p.y,-2500);assert.equal(restored.boss,restored.enemies.find(e=>e.id===b.id));
+  assert.equal(restored.boss.shieldTime,1.7);assert.equal(restored.bullets[0].hits.has(b.id),true);assert.equal(restored.world.isUsed(1),true);
+  restored.pause();assert.doesNotThrow(()=>restored.update(.05));
+  g.finishBoss(b);const loot=roundTrip();assert.equal(loot.state,'loot');assert.deepEqual(loot.choices,g.choices);
+  for(let i=0;i<65;i++)g.update(.05);
+  const reward=roundTrip();assert.equal(reward.state,'relic');assert.deepEqual(reward.choices,g.choices);
+  assert.equal(reward.chooseRelic(reward.choices[0].id),true);assert.equal(reward.chooseRelic(reward.choices[0]?.id),false);
+});
+
+test('atomic profile plus run save does not duplicate collected gold and rejects corrupt snapshots',()=>{
+  const g=isolated();g.coins=12;g.lives=2;let value;
+  writeProgress({setItem:(key,json)=>{assert.equal(key,'wildfire-save');value=json;}},{bank:112,gear:[0,0,0,0]},g);
+  const saved=JSON.parse(value),restored=restoreRun(new Game(),saved.run);
+  assert.equal(saved.bank,112);assert.equal(restored.coins,12);restored.pause();restored.collectDrops(0);assert.equal(restored.coins,12);
+  saved.run.data.lives=0;assert.throws(()=>restoreRun(new Game(),saved.run),/存档/);
+  assert.throws(()=>writeProgress({setItem:()=>{throw new Error('quota');}},{},g),/quota/);
+});
 
 test('evolution guidance tracks run choices, previews the finishing choice and matches real evolution',()=>{
   const g=new Game({gear:[10,0,0,0]});
@@ -170,8 +226,8 @@ test('boss gates block running past encounters, freeze on pause and clear after 
   g.pause();const clock=b.attackClock;g.update(.05);assert.equal(b.attackClock,clock);g.pause();
   g.hazards=[{owner:b.id}];g.enemyShots=[{owner:b.id}];
   for(let i=0;i<40&&b.hp>0;i++){b.shieldTime=0;g.hit(b,b.maxHp);}
-  assert.equal(g.state,'relic');assert.equal(g.boss,null);assert.equal(g.bossGate,null);assert.equal(g.hazards.length,0);assert.equal(g.enemyShots.length,0);
-  assert.equal(g.chooseRelic('guardian'),true);assert.equal(g.p.hp,160);assert.equal(g.chooseRelic('guardian'),false);assert.equal(g.state,'playing');
+  assert.equal(g.state,'loot');for(let i=0;i<65;i++)g.update(.05);assert.equal(g.state,'relic');assert.equal(g.boss,null);assert.equal(g.bossGate,null);assert.equal(g.hazards.length,0);assert.equal(g.enemyShots.length,0);
+  assert.equal(g.chooseRelic('bulwark'),true);assert.equal(g.p.hp,180);assert.equal(g.chooseRelic('bulwark'),false);assert.equal(g.state,'playing');
 });
 test('all three evolution combinations unlock once and change actual weapon behavior',()=>{
   const events=[];const g=isolated();g.onEvent=(t,n)=>{if(t==='evolution')events.push(n);};

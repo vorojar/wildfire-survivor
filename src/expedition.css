@@ -31,3 +31,12 @@
   .close{top:0}
   .nova-button small{display:none}
 }
+
+.lives-hud{position:absolute;top:114px;left:16px;display:flex;align-items:center;gap:4px;background:#23141fdf;border:1px solid #ec8cab66;border-radius:5px;color:#ffb4ce;padding:5px 7px;font-size:10px;pointer-events:none}.lives-hud span{font-size:8px;color:#d3a0b4}.loot-banner{position:absolute;top:28%;left:5%;width:90%;text-align:center;color:#ffe5a7;text-shadow:0 2px 5px #000;pointer-events:none}.loot-banner>svg{display:block;margin:0 auto 9px}.loot-banner b{display:block;font-size:23px;letter-spacing:2px}.loot-banner span{display:block;margin-top:10px;font-size:10px}.relic-overlay .upgrade-modal>h2{font-size:23px;letter-spacing:1px}.relic-overlay .upgrade-modal>p{line-height:1.9;color:#d1bd8c}.arena-footer{letter-spacing:1px}.lives-hud.during-boss{top:160px}
+@media(max-width:600px){.lives-hud{top:100px;left:10px;padding:4px 6px;font-size:9px}.loot-banner b{font-size:21px}.relic-overlay .upgrade-modal>h2{font-size:21px}}
+
+@media(max-width:600px){.lives-hud.during-boss{top:139px}}
+
+.relic-overlay .level-burst .atlas-sprite{width:58px;height:48px}
+
+.save-conflict{z-index:40;background:#08150ff5}

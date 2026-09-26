@@ -7,7 +7,21 @@ export const relics = [
   { id: 'hunter', name: '猎杀核心', desc: '伤害 +20%，暴击率 +8%', icon: 'Crosshair', tag: '稀有 · 火力' },
   { id: 'guardian', name: '守护核心', desc: '生命上限 +40，立即回满生命', icon: 'Shield', tag: '稀有 · 生存' },
   { id: 'reactor', name: '聚能核心', desc: '冲击波强化，立即充能并获得环绕球', icon: 'Orbit', tag: '稀有 · 能量' },
+  { id: 'bulwark', name: '巨像之心', desc: '生命上限 +60，恢复全部生命', icon: 'Shield', tag: '巨像遗物' },
+  { id: 'spore', name: '孢冠精华', desc: '拾取范围 +100，伤害 +15%', icon: 'Crosshair', tag: '女王遗物' },
+  { id: 'wing', name: '永夜羽刃', desc: '移速 +20，射击间隔缩短 14%', icon: 'Crosshair', tag: '蝠王遗物' },
+  { id: 'phoenix', name: '不熄余烬', desc: '剩余生命 +1，并恢复全部生命', icon: 'Heart', tag: '稀有 · 续命' },
+  { id: 'barrage', name: '弹幕核心', desc: '额外发射 1 枚子弹，穿透 +1', icon: 'Crosshair', tag: '稀有 · 弹幕' },
 ];
+
+export function bossRewards(game, boss) {
+  const featured = relics.find(r => r.id === ['bulwark','spore','wing'][boss.bossType]);
+  const pool = relics.filter(r => r !== featured && !(r.id === 'phoenix' && game.lives + (game.lastBoss?.life?1:0) >= 5) && !(r.id === 'barrage' && game.multi >= 7) && !(r.id === 'reactor' && game.orbits >= 5));
+  // Prefer rewards not chosen recently, keeping every chest from feeling identical.
+  const recent = game.relics.slice(-3);
+  const shuffled = pool.map(r => ({ ...r, order: Math.random() + (recent.includes(r.id) ? 2 : 0) })).sort((a,b) => a.order-b.order);
+  return [featured, ...shuffled.slice(0,2)].map(r => ({ ...r }));
+}
 
 export function updateBoss(game, boss, dt) {
   boss.shieldTime = Math.max(0, boss.shieldTime - dt);

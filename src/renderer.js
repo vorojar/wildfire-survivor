@@ -66,7 +66,13 @@ export function drawGame(ctx, g, assets, clock) {
   }
   for (const d of g.drops) if (Math.abs(d.y - g.p.y) < height) {
     const y=d.y+Math.sin(clock*5+d.phase)*2,item=lootTypes[d.type];
+    if(d.bossLoot){ctx.strokeStyle=d.type==='life'?'#ff99c9aa':'#ffda7955';ctx.lineWidth=d.type==='coin'?2:4;ctx.beginPath();ctx.moveTo(d.x,y);ctx.lineTo(d.x,y-25-Math.sin(clock*3+d.phase)*8);ctx.stroke();}
     if(d.type==='coin')sprite(6,d.x,y,18);
+    else if(d.type==='life'){
+      ctx.save();ctx.translate(d.x,y);ctx.shadowBlur=18;ctx.shadowColor='#ff76b0';ctx.fillStyle='#ff85b3';ctx.strokeStyle='#ffe4ee';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(0,13);ctx.bezierCurveTo(-24,-2,-13,-20,0,-9);ctx.bezierCurveTo(13,-20,24,-2,0,13);ctx.fill();ctx.stroke();ctx.restore();
+      ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillStyle='#ffbfdb';ctx.fillText('生命 +1',d.x,y+28);
+    }
     else {sprite(item.art,d.x,y,d.type==='xp'?15:33,false,1,'loot');if(d.type!=='xp'){ctx.font='8px sans-serif';ctx.textAlign='center';ctx.fillStyle=item.color;ctx.fillText(item.name,d.x,y+25);}}
   }
   const units = [...g.enemies.map(e => ({ ...e, isPlayer: false })), { ...g.p, isPlayer: true, size: 62 }].sort((a, b) => a.y - b.y);
