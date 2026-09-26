@@ -15,11 +15,13 @@ npm run dev
 
 - 源码仓库：https://github.com/vorojar/wildfire-survivor
 - GitHub Pages：https://vorojar.github.io/wildfire-survivor/
-- 自定义域名：wildfire.bibidu.com，由 Cloudflare DNS 指向 vorojar.github.io。
+- 自定义域名：https://wildfire.bibidu.com，由 Cloudflare 代理转发到 GitHub Pages。
 
 源码保存在 `main`，构建产物由 `gh-pages` 分支根目录发布。已登录有推送权限的 GitHub 账号后，执行 `npm run deploy`，会先测试、构建，再推送发布分支；GitHub Pages 自动部署该分支。源码修改另外提交并推送 `main`。相对资源路径兼容项目子目录和独立域名。自定义域名启用后，GitHub 默认地址会跳转到自定义域名。
 
 网站存档按访问域名分别保存，localhost 上的存档不会自动迁移到线上。
+
+域名配置：`wildfire` 的 CNAME 指向 `vorojar.github.io`，启用 Cloudflare 代理，沿用该区域现有的 Full 加密模式与通配证书。`Wildfire HTTPS` 跳转规则仅匹配 `http://wildfire.bibidu.com/*`，保留路径和查询参数并重定向到 HTTPS；其他子域名不受此规则影响。`public/CNAME` 随构建复制，避免后续发布丢失 GitHub 自定义域名设置。
 
 ## 操作
 
