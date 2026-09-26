@@ -1,0 +1,8 @@
+node_modules/
+dist/
+test-results/
+.qa/
+.vite*.log
+.env
+.env.*
+!.env.example
