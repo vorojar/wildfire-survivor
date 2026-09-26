@@ -20,22 +20,25 @@ export function updateBoss(game, boss, dt) {
   }
   boss.attackClock -= dt;
   if (boss.attackClock > 0) return;
-  boss.attackClock = (boss.bossType === 2 ? 3.5 : 4.1) - boss.phaseLevel * .6;
+  boss.attackClock = Math.max(1.65, ((boss.bossType === 2 ? 3.5 : 4.1) - boss.phaseLevel * .6) / boss.aggression);
   const attack = boss.attackCount++;
   const angle = Math.atan2(game.p.y - boss.y, game.p.x - boss.x);
-  const base = { owner: boss.id, bossAttack: true, color: boss.color, age: 0, damage: 30 + boss.phaseLevel * 5, active: .45 };
+  const damageScale = 1 + (boss.aggression-1)*.6;
+  const base = { owner: boss.id, bossAttack: true, color: boss.color, age: 0, damage: (30 + boss.phaseLevel * 5)*damageScale, active: .45 };
   if (boss.bossType === 0 && attack % 2 === 1) {
     boss.intent = '扇形重击';
-    game.hazards.push({ ...base, shape: 'cone', x: boss.x, y: boss.y, angle, spread: 1.15, radius: 190, warn: 1.2, damage: 30 });
+    game.hazards.push({ ...base, shape: 'cone', x: boss.x, y: boss.y, angle, spread: 1.15, radius: 190, warn: 1.2 });
+    // Aimed rock shards keep the golem dangerous at rifle range; the same windup remains.
+    game.hazards.push({ ...base, shape: 'line', x: boss.x, y: boss.y, tx: game.p.x, ty: game.p.y, radius: 8, warn: 1.2, active: .15, shotCount: 3+boss.phaseLevel*2, projectileSpeed: 155+boss.phaseLevel*15 });
   } else if (boss.bossType === 1) {
     boss.intent = attack % 2 ? '菌群召唤' : '毒性孢子';
     for (let i = 0; i < 3; i++) {
-      game.hazards.push({ ...base, shape: 'circle', x: Math.max(45, Math.min(435, game.p.x + (i - 1) * 105)), y: game.p.y + Math.sin(i * 2.5) * 90, radius: 61, warn: 1.4, active: 4, damage: 11, poison: true });
+      game.hazards.push({ ...base, shape: 'circle', x: Math.max(45, Math.min(435, game.p.x + (i - 1) * 105)), y: game.p.y + Math.sin(i * 2.5) * 90, radius: 61, warn: 1.4, active: 4, damage: 11*damageScale, poison: true });
     }
     if (attack % 2) for (let i = 0; i < 4; i++) game.spawn(i % 2 ? 12 : 10, Math.max(30, Math.min(450, boss.x + (i - 1.5) * 52)), boss.y + 70);
   } else if (boss.bossType === 2 && attack % 2 === 1) {
     boss.intent = '血月弹幕';
-    game.hazards.push({ ...base, shape: 'circle', x: boss.x, y: boss.y, radius: 95, warn: 1.25, active: .2, burst: true, damage: 16 });
+    game.hazards.push({ ...base, shape: 'circle', x: boss.x, y: boss.y, radius: 95, warn: 1.25, active: .2, burst: true, damage: 16*damageScale, projectileSpeed: 125+boss.phaseLevel*15 });
   } else {
     boss.intent = boss.bossType === 0 ? '蓄力冲撞' : '俯冲突袭';
     const range = boss.bossType === 0 ? 320 : 360;
@@ -71,7 +74,7 @@ export function updateHazards(game, dt) {
       }
       if (h.burst && owner) for (let i = 0; i < 18; i++) {
         const a = i / 18 * Math.PI * 2 + owner.attackCount * .13;
-        game.enemyShots.push({ x: h.x, y: h.y, vx: Math.cos(a) * 125, vy: Math.sin(a) * 125, life: 5, damage: 14, owner: owner.id, color: h.color });
+        game.enemyShots.push({ x: h.x, y: h.y, vx: Math.cos(a) * h.projectileSpeed, vy: Math.sin(a) * h.projectileSpeed, life: 5, damage: h.damage, owner: owner.id, color: h.color });
       }
       game.onEvent('impact');
     }

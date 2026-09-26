@@ -10,18 +10,33 @@ export function AtlasSprite({ index, className = '' }) {
 export function ExpeditionHUD({ game }) {
   const boss = game.boss;
   return <>
-    <div className="journey-hud"><span style={{ color: game.biome.color }}><Compass size={13}/>{game.biome.name}</span><b>{Math.floor(distanceAt(game.p.y))} m <small>↑ 北</small></b><span>威胁 ×{game.difficulty.toFixed(1)}</span></div>
+    <div className="journey-hud"><span style={{ color: game.biome.color }}><Compass size={13}/>{game.biome.name}</span><b>{Math.floor(distanceAt(game.p.y))} m <small>↑ 北</small></b><span>威胁 ×{(game.difficulty*game.threatGrowth).toFixed(1)}</span></div>
     {boss ? <div className="boss-hud" role="status"><div><Crown size={14}/><b>{boss.name}</b><span>{boss.shieldTime>0?`护盾 ${boss.shieldTime.toFixed(1)}s`:boss.intent}</span><small>{Math.ceil(boss.hp)} / {Math.ceil(boss.maxHp)}</small></div><div className="boss-health"><i style={{ width: `${Math.max(0,boss.hp / boss.maxHp) * 100}%`, background: boss.shieldTime>0?'#9ae6f4':boss.color }}/></div><p>第 {boss.phaseLevel+1} 阶段 · {boss.shieldTime>0?'护盾重组，躲避反击':'前路封锁，避开预警'}</p></div> : <div className="journey-next">{game.state === 'ready' ? '向北探索 · 三大区域 · 无尽远征' : `下次首领：${Math.max(0,Math.ceil(game.nextBossDistance-game.distance))} m / ${Math.max(0,Math.ceil(game.nextBossTime-game.time))} s`}</div>}
   </>;
 }
 export function EvolutionPanel({ game, compact = false }) {
   return <section className={`evolution-panel ${compact ? 'compact' : 'panel'}`} aria-label="武器进化路线">
     <h3><Sparkles size={18}/>武器进化<small>组合达成后自动进化</small></h3>
-    {game.evolutions.map(e => <div className={game.evolved.has(e.id) ? 'evolved' : ''} key={e.id}>
+    {game.evolutions.map(e => <div className={`evolution-route ${game.evolved.has(e.id) ? 'evolved' : ''}`} key={e.id}>
       {!compact && <AtlasSprite index={e.art}/>}
-      <span><b>{e.name}</b><small>{e.rule}</small></span><em>{game.evolved.has(e.id) ? '已进化' : e.progress}</em>
+      <span className="route-content"><b>{e.from} <ChevronRight size={12}/>{e.name}</b>
+        <span className="route-requirements">{e.requirements.map(r => <small className={r.current === r.needed ? 'met' : ''} key={r.id}>{r.name} <strong>{r.current}/{r.needed}{r.current === r.needed ? ' ✓' : ''}</strong></small>)}</span>
+        {!compact && <small className="route-effect">{e.effect}</small>}
+      </span><em>{game.evolved.has(e.id) ? '已进化 ✓' : `还差 ${e.remaining} 次`}</em>
     </div>)}
   </section>;
+}
+export function UpgradeEvolutionHint({ game, id }) {
+  const hint = game.evolutionHint(id);
+  return hint && <span className={`upgrade-evolution-hint ${hint.complete ? 'will-evolve' : ''}`}><Sparkles size={12}/>{hint.text}</span>;
+}
+export function EvolutionModal({ game, onClose }) {
+  return <div className="overlay evolution-overlay" role="dialog" aria-modal="true" aria-label="查看武器进化" onPointerDown={e => e.stopPropagation()} onKeyDown={e => { if(e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+    <div className="evolution-modal"><Sparkles size={28}/><h2>让火力进化</h2><p>升级时选择下方强化，凑齐后立即自动进化。<br/>每条路线可同时培养，进度仅计算本局选择。</p>
+      <EvolutionPanel game={game}/><p className="evolution-note">主武器进化后替换步枪；副武器与步枪同时攻击。<br/>军械库的永久强化不计入进化条件。</p>
+      <button className="primary" autoFocus onClick={onClose}>{game.state === 'ready' ? '知道了，准备出发' : '返回战场'}</button>
+    </div>
+  </div>;
 }
 export function AdvanceButton({ game, refresh }) {
   return <button className={`advance-button ${game.autoAdvance ? 'advancing' : ''}`} disabled={!!game.boss} aria-label={game.autoAdvance ? '停止自动前进' : '自动向北前进'} onClick={() => { game.autoAdvance = !game.autoAdvance; refresh(); }}><ArrowUp size={20}/><span>{game.boss ? '首领封锁' : game.autoAdvance ? '停止前进' : '向北前进'}</span></button>;

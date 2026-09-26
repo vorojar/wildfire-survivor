@@ -35,15 +35,71 @@ test('lethal contact ends run and new game resets run while respecting permanent
   const g=new Game({gear:[2,3,1,2]});assert.equal(g.damage,26);assert.equal(g.p.maxHp,180);g.start();g.p.hp=1;g.spawn(3,g.p.x,g.p.y);g.shootClock=100;g.update(.01);assert.equal(g.state,'dead');assert.equal(g.p.hp,0);
   const next=new Game({gear:[2,3,1,2]});assert.equal(next.coins,0);assert.equal(next.level,1);assert.equal(next.p.hp,180);
 });
-test('a long expedition cycles all bosses and keeps world/combat memory bounded',()=>{
+test('a long expedition cycles all bosses and keeps world/combat memory bounded',(t)=>{
+  let seed=42;t.mock.method(Math,'random',()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296));
   const g=new Game();g.start();g.p.maxHp=g.p.hp=1e9;g.damage=500;g.multi=7;g.pierce=3;g.magnet=1000;
   const bosses=new Set();g.onEvent=(t,name)=>{if(t==='boss')bosses.add(name);};
-  for(let i=0;i<9000;i++){if(g.state==='upgrade')g.choose(g.choices[0].id);if(g.state==='relic')g.chooseRelic('hunter');g.update(.05,{x:Math.sin(i/200)*.3,y:-1});if(i%240===0)g.nova();}
+  for(let i=0;i<12000;i++){if(g.state==='upgrade')g.choose(g.choices[0].id);if(g.state==='relic')g.chooseRelic('hunter');g.update(.05,{x:Math.sin(i/200)*.3,y:-1});if(i%240===0)g.nova();}
   assert.equal(bosses.size,3);assert.ok(g.bossKills>=6);assert.ok(g.distance>3000);assert.ok(g.kills>500);assert.ok(g.bullets.length<500);assert.ok(g.particles.length<=500);assert.ok(g.drops.length<=500);assert.ok(g.world.chunks.size<=5);assert.ok(Number.isFinite(g.p.hp));
 });
 
 function isolated(){const g=new Game();g.start();g.enemies=[];g.spawnClock=1e6;g.nextBossTime=1e6;g.nextBossDistance=1e6;g.nextElite=1e6;return g;}
 function grant(g,id){g.state='upgrade';g.choices=[{id}];assert.equal(g.choose(id),true);}
+
+test('evolution guidance tracks run choices, previews the finishing choice and matches real evolution',()=>{
+  const g=new Game({gear:[10,0,0,0]});
+  assert.equal(g.evolutions[0].remaining,4); // permanent gun levels do not count
+  assert.equal(g.evolutionHint('heal'),null);
+  grant(g,'power');grant(g,'power');
+  assert.match(g.evolutionHint('power').text,/仍需极速扳机 ×2/);
+  assert.equal(g.evolutions[0].requirements[0].current,2);
+  grant(g,'speed');
+  const before=JSON.stringify(g.levels);
+  assert.equal(g.evolutionHint('speed').complete,true);
+  assert.match(g.evolutionHint('speed').text,/立即进化 → 炼狱加特林/);
+  assert.equal(JSON.stringify(g.levels),before);
+  grant(g,'speed');assert.equal(g.weaponName,'炼狱加特林');
+  assert.equal(g.evolutions[0].remaining,0);
+  assert.match(g.evolutionHint('speed').text,/已进化/);
+  grant(g,'power');assert.equal(g.evolutions[0].requirements[0].current,2);
+  for(const [id,finish] of [['shotgun','multi'],['orbit','nova']]){
+    grant(g,id);grant(g,id);grant(g,id);
+    assert.equal(g.evolutionHint(finish).complete,true);grant(g,finish);
+  }
+  assert.equal(g.evolved.size,3);
+  assert.equal(new Game().evolutions[0].remaining,4);
+});
+
+test('level and firepower gradually strengthen new enemies without erasing the upgrade advantage',()=>{
+  const g=isolated(), old=g.spawn(0,20,20), oldHp=old.hp;
+  const initialTarget=g.targetThreatGrowth;g.level=8;
+  assert.ok(g.targetThreatGrowth>initialTarget);
+  for(const id of ['power','power','speed','speed'])grant(g,id);
+  const target=g.targetThreatGrowth;
+  assert.ok(target>2);assert.equal(g.threatGrowth,1);
+  assert.equal(old.hp,oldHp);
+  g.buffs.haste=12;g.novaPower=20;
+  assert.equal(g.targetThreatGrowth,target); // temporary burst is a reward, not a difficulty penalty
+  g.enemies=[];
+  for(let i=0;i<360;i++)g.update(.05);
+  assert.ok(g.threatGrowth>1&&g.threatGrowth<target);
+  const tougher=g.spawn(0,20,20);
+  assert.ok(tougher.hp>oldHp);assert.ok(tougher.speed>old.speed);assert.ok(tougher.damage>old.damage);
+  assert.ok(tougher.hp/oldHp<g.powerRatio); // evolved gun still clears faster
+});
+
+test('evolved burst builds must fight through repeated boss attacks and spawn health stays fixed',()=>{
+  for(let type=0;type<3;type++){
+    const g=isolated();g.level=8;g.p.hp=g.p.maxHp=1e9;
+    for(const id of ['power','power','speed','speed','power','multi','multi'])grant(g,id);
+    g.bossIndex=type;const b=g.spawnBoss(),maxHp=b.maxHp;
+    assert.ok(maxHp>10000);
+    grant(g,'power');assert.equal(b.maxHp,maxHp);assert.equal(b.hp,maxHp);
+    for(let i=0;i<3000&&g.boss;i++){g.spawnClock=1e9;g.update(.05);if(g.state==='upgrade')g.choose(g.choices[0].id);}
+    assert.equal(g.boss,null);assert.ok(g.time>20&&g.time<100,`boss ${type}: ${g.time}s`);
+    assert.ok(b.attackCount>=6);assert.equal(b.phaseLevel,2);
+  }
+});
 
 test('starting southward can reach and collect items beyond the former invisible boundary',()=>{
   const g=isolated();g.p.hp=50;g.drop(g.p.x,ORIGIN_Y+450,35,'heal');

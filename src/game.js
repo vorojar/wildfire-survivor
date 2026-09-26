@@ -19,13 +19,18 @@ export const upgrades = [
   { id: 'nova', name: '过载脉冲', desc: '冲击波伤害 +50%，冷却缩短', icon: 'Radio', tag: '技能升级' },
 ];
 export const timeText = t => `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
+const evolutionRecipes = [
+  { id: 'gatling', name: '炼狱加特林', art: 3, from: '突击步枪', effect: '主武器进化 · 极速连射，额外穿透', needs: [['power', 2], ['speed', 2]] },
+  { id: 'blast', name: '爆裂霰弹', art: 4, from: '自动霰弹枪', effect: '副武器进化 · 更快发射，命中爆炸', needs: [['shotgun', 3], ['multi', 1]] },
+  { id: 'storm', name: '电磁风暴', art: 5, from: '电磁护卫', effect: '副武器进化 · 扩大环绕，连锁闪电', needs: [['orbit', 3], ['nova', 1]] },
+];
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
 export class Game {
   constructor({ onEvent = () => {}, hero = 0, gear = [0, 0, 0, 0] } = {}) {
     this.onEvent = onEvent; this.hero = hero; this.gear = [...gear];
-    this.state = 'ready'; this.time = 0; this.kills = 0; this.coins = 0; this.level = 1; this.xp = 0; this.nextXp = 22;
+    this.state = 'ready'; this.time = 0; this.kills = 0; this.coins = 0; this.level = 1; this.xp = 0; this.nextXp = 22; this.threatGrowth = 1;
     this.p = { x: W / 2, y: ORIGIN_Y, hp: 120 + gear[1] * 20, maxHp: 120 + gear[1] * 20, speed: 150 + gear[2] * 10, invuln: 0, face: 1 };
     this.damage = (hero ? 22 : 18) + gear[0] * 4; this.interval = hero ? .27 : .21;
     this.multi = 1; this.pierce = 0; this.magnet = 130 + gear[3] * 15; this.orbits = 0; this.novaPower = 1; this.crit = .16;
@@ -41,15 +46,33 @@ export class Game {
     for (let i = 0; i < 9; i++) this.drop(rand(90, 390), rand(190, 620), 1);
   }
   get difficulty() { return 1 + this.distance / 430 + this.time / 240; }
+  // Sustained output only: temporary haste, bombs and nova never inflate enemy health.
+  get sustainedDps() {
+    const primary = this.damage / (this.interval * (this.evolved.has('gatling') ? .52 : 1)) * (1 + (this.multi-1)*.55);
+    const shotgunLevel = this.levels.shotgun ?? 0;
+    const shotgun = shotgunLevel ? this.damage * (.65 + shotgunLevel*.12) * 3 / (this.evolved.has('blast') ? .85 : 1.35) : 0;
+    const orbit = this.orbits ? this.damage * (this.evolved.has('storm') ? 2.4 : 1.7) / .35 * Math.min(1, this.orbits*.22) : 0;
+    return (primary + shotgun) * (1 + this.crit*.8) + orbit;
+  }
+  get powerRatio() { return Math.max(1, this.sustainedDps / 97); }
+  get targetThreatGrowth() { return Math.pow(this.powerRatio, .48) * (1 + (this.level-1)*.045); }
+  get pressure() { return Math.min(1.5, Math.log2(this.threatGrowth)*.3); }
   get weaponName() { return this.evolved.has('gatling') ? '炼狱加特林' : '突击步枪'; }
   get musicMode() { return this.boss ? 'boss' : this.enemies.length >= 18 ? 'combat' : 'explore'; }
   get evolutions() {
-    const lv = id => this.levels[id] ?? 0;
-    return [
-      { id: 'gatling', name: '炼狱加特林', art: 3, rule: '弹头 2 + 扳机 2', progress: `${Math.min(2, lv('power'))}/2 · ${Math.min(2, lv('speed'))}/2`, ready: lv('power') >= 2 && lv('speed') >= 2 },
-      { id: 'blast', name: '爆裂霰弹', art: 4, rule: '霰弹 3 + 散射 1', progress: `${Math.min(3, lv('shotgun'))}/3 · ${Math.min(1, lv('multi'))}/1`, ready: lv('shotgun') >= 3 && lv('multi') >= 1 },
-      { id: 'storm', name: '电磁风暴', art: 5, rule: '护卫 3 + 脉冲 1', progress: `${Math.min(3, lv('orbit'))}/3 · ${Math.min(1, lv('nova'))}/1`, ready: lv('orbit') >= 3 && lv('nova') >= 1 },
-    ];
+    return evolutionRecipes.map(recipe => {
+      const requirements = recipe.needs.map(([id, needed]) => ({ id, needed, name: upgrades.find(u => u.id === id).name, current: Math.min(needed, this.levels[id] ?? 0) }));
+      const remaining = requirements.reduce((sum, r) => sum + r.needed - r.current, 0);
+      return { ...recipe, requirements, remaining, ready: remaining === 0, progress: requirements.map(r => `${r.current}/${r.needed}`).join(' · ') };
+    });
+  }
+  evolutionHint(upgradeId) {
+    const route = this.evolutions.find(e => e.requirements.some(r => r.id === upgradeId));
+    if (!route) return null;
+    const requirement = route.requirements.find(r => r.id === upgradeId);
+    if (this.evolved.has(route.id)) return { complete: false, text: `${route.name}已进化 · 继续强化属性` };
+    if (requirement.current >= requirement.needed) return { complete: false, text: `${requirement.name}已达标 · 仍需${route.requirements.filter(r => r.current < r.needed).map(r => `${r.name} ×${r.needed-r.current}`).join('、')}` };
+    return { complete: route.remaining === 1, text: route.remaining === 1 ? `本次选择立即进化 → ${route.name}` : `→ ${route.name} · ${requirement.current}→${requirement.current+1}/${requirement.needed}` };
   }
   start() { this.state = 'playing'; this.enemies = []; this.drops = []; for (let i = 0; i < 8; i++) this.spawn(enemyForZone(0)); this.onEvent('start'); }
   resizeViewport(height) {
@@ -57,21 +80,24 @@ export class Game {
     this.cameraY = this.p.y - height * .52;
   }
   spawn(type, x, y) {
-    const t = enemyTypes[type], scale = this.difficulty;
+    const t = enemyTypes[type], scale = this.difficulty * this.threatGrowth;
     if (x === undefined) {
       const edge = Math.floor(rand(0, 4));
       x = edge === 0 ? -24 : edge === 1 ? W + 24 : rand(25, W - 25);
       y = this.cameraY + (edge === 2 ? -24 : edge === 3 ? this.viewHeight + 24 : rand(65, this.viewHeight - 50));
     }
-    const e = { ...t, type, x, y, maxHp: t.hp * scale, hp: t.hp * scale, damage: t.damage * (1 + this.distance / 2200), speed: t.speed * Math.min(2.5, 1 + this.distance / 1800), id: ++this.uid, flash: 0, phase: rand(0, 6), orbitHit: 0, attackClock: rand(2, 4) };
+    const e = { ...t, type, x, y, maxHp: t.hp * scale, hp: t.hp * scale, damage: t.damage * (1 + this.distance / 2200 + this.pressure*.35), speed: t.speed * Math.min(2.5, 1 + this.distance / 1800 + this.pressure*.25), cooldown: t.cooldown ? t.cooldown/(1+this.pressure*.3) : undefined, id: ++this.uid, flash: 0, phase: rand(0, 6), orbitHit: 0, attackClock: rand(2, 4) };
     this.enemies.push(e); return e;
   }
   spawnBoss() {
     if (this.boss) return null;
     const index = this.bossIndex++ % bossTypes.length, type = bossTypes[index];
-    const hp = type.hp * (1 + this.bossKills * .55 + this.distance / 650) * (1 + this.gear[0] * .12);
+    const worldHp = type.hp * (1 + this.bossKills * .55 + this.distance / 650) * (1 + this.gear[0]*.12) * (1 + (this.level-1)*.025);
+    // Lock health at spawn: upgrading during a fight never heals or rescales this boss.
+    const hp = Math.max(worldHp, this.sustainedDps * .8 * (26 + Math.min(12,this.bossKills*2)));
+    const aggression = 1 + Math.min(.65, Math.log2(this.powerRatio)*.13 + (this.level-1)*.008);
     this.bossGate = this.p.y - 45;
-    const boss = { ...type, type: 3, sprite: 5, bossType: index, isBoss: true, id: ++this.uid, hp, maxHp: hp, x: W / 2, y: this.p.y - 180, flash: 0, phase: 0, orbitHit: 0, attackClock: 2.2, attackCount: 0, intent: '正在逼近', phaseLevel: 0, shieldTime: 0, dash: null };
+    const boss = { ...type, damage: type.damage*(1+(aggression-1)*.6), speed: type.speed*(1+(aggression-1)*.3), aggression, type: 3, sprite: 5, bossType: index, isBoss: true, id: ++this.uid, hp, maxHp: hp, x: W / 2, y: this.p.y - 180, flash: 0, phase: 0, orbitHit: 0, attackClock: 1.6, attackCount: 0, intent: '正在逼近', phaseLevel: 0, shieldTime: 0, dash: null };
     this.boss = boss; this.enemies.push(boss); this.autoAdvance = false;
     this.onEvent('boss', boss.name); return boss;
   }
@@ -187,6 +213,7 @@ export class Game {
   update(dt, input = { x: 0, y: 0 }) {
     if (this.state !== 'playing') return;
     dt = Math.max(0, Math.min(dt, .05)); this.time += dt; const p = this.p;
+    this.threatGrowth += (this.targetThreatGrowth - this.threatGrowth) * (1-Math.exp(-dt/18));
     this.novaCooldown = Math.max(0, this.novaCooldown - dt); p.invuln = Math.max(0, p.invuln - dt); this.shake = Math.max(0, this.shake - dt * 28);
     this.comboClock -= dt; if (this.comboClock <= 0) this.combo = 0;
     for(const buff of Object.keys(this.buffs))this.buffs[buff]=Math.max(0,this.buffs[buff]-dt);
@@ -194,11 +221,11 @@ export class Game {
     if (!this.boss && (this.distance >= this.nextBossDistance || this.time >= this.nextBossTime)) this.spawnBoss();
     this.spawnClock -= dt;
     if (this.spawnClock <= 0) {
-      this.spawnClock = this.boss ? 1.4 : Math.max(.19, .52 - this.time * .001 - this.distance * .00008);
-      const count = this.boss ? 1 : Math.min(5, 1 + Math.floor(this.time / 50 + this.distance / 350));
+      this.spawnClock = this.boss ? 1.4/(1+this.pressure*.4) : Math.max(.19, (.52 - this.time * .001 - this.distance * .00008)/(1+this.pressure*.3));
+      const count = this.boss ? 1 : Math.min(5, 1 + Math.floor(this.time / 50 + this.distance / 350 + this.pressure));
       for (let i = 0; i < count; i++) if (this.enemies.length < 130) this.spawn(enemyForZone(Math.floor(distanceAt(p.y)/380)));
     }
-    if (this.time >= this.nextElite) { if (!this.boss) this.spawn(3); this.nextElite += 40; }
+    if (this.time >= this.nextElite) { if (!this.boss) this.spawn(3); this.nextElite += 40/(1+this.pressure*.6); }
     this.shootClock -= dt; this.shotgunClock -= dt;
     let target = null, nearest = Infinity;
     for (const e of this.enemies) { if (e.hp <= 0) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < nearest) { nearest = d; target = e; } }
