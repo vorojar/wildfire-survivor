@@ -2,6 +2,7 @@ import { biomeAt } from './world.js';
 
 const omitted = new Set(['onEvent','world','biome','boss','evolved','bullets','particles','texts','rings','arcs']);
 const states = ['playing','paused','upgrade','loot','relic'];
+export class SaveConflictError extends Error {}
 
 export function captureRun(game) {
   if(!game || !states.includes(game.state))return null;
@@ -22,7 +23,10 @@ function finiteTree(value, depth=0) {
 export function restoreRun(game, snapshot) {
   const invalid=()=>{throw new Error('本局存档损坏或版本不兼容，永久装备仍保留。');};
   if(!snapshot || snapshot.version!==1 || !finiteTree(snapshot))invalid();
-  const d=snapshot.data;
+  const d={...snapshot.data};
+  // Migrate existing version-one saves without discarding their expedition.
+  if(!('regionEvent' in d))d.regionEvent=null;
+  if(!('nextRegionEvent' in d))d.nextRegionEvent=Math.max(110,(d.distance??0)+90);
   if(!d || !states.includes(d.state) || !Number.isInteger(d.lives) || d.lives<1 || d.lives>5 || !d.p || d.p.hp<=0 || d.p.maxHp<d.p.hp)invalid();
   for(const [key,value] of Object.entries(game)){
     if(omitted.has(key))continue;
@@ -51,7 +55,11 @@ export function restoreRun(game, snapshot) {
 
 // Profile and expedition are one atomic localStorage write, preventing duplicated banked loot.
 export function writeProgress(storage, profile, game) {
-  const savedAt=Date.now();
-  storage.setItem('wildfire-save',JSON.stringify({...profile,run:captureRun(game),savedAt}));
-  return savedAt;
+  const latest=JSON.parse(storage.getItem('wildfire-save')||'null');
+  if((latest?.revision??0)!==(profile.revision??0))throw new SaveConflictError('另一个页面已更新进度');
+  const saved={...profile,run:game?.state==='ready'?(profile.run??null):captureRun(game),savedAt:Date.now(),revision:(profile.revision??0)+1};
+  const serialized=JSON.stringify(saved);
+  storage.setItem('wildfire-save',serialized);
+  // Keep in-memory continuation identical to a reload, without live game references.
+  return JSON.parse(serialized);
 }

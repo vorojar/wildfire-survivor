@@ -80,6 +80,10 @@ export function drawGame(ctx, g, assets, clock) {
     if (e.y - camera < -100 || e.y - camera > height + 100) continue;
     ctx.fillStyle = '#030a0860'; ctx.beginPath(); ctx.ellipse(e.x, e.y + e.size * .32, e.size * .3, e.size * .13, 0, 0, Math.PI * 2); ctx.fill();
     const bob = Math.sin(clock * (e.type === 1 ? 12 : 7) + (e.phase ?? 0)) * 2;
+    if(e.elite || (e.eventId!==undefined && g.regionEvent?.id===e.eventId)){
+      ctx.strokeStyle=e.elite?'#ffd174':'#88e9e2';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(e.x,e.y+e.size*.3,e.size*.42,e.size*.18,0,0,Math.PI*2);ctx.stroke();
+      if(e.elite){ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillStyle='#ffe4a3';ctx.fillText(e.affix+' · '+e.name,e.x,e.y-e.size*.65);}
+    }
     if (e.isBoss) drawAtlas(ctx, assets.expedition, e.art, e.x, e.y + bob, e.size, e.x > g.p.x);
     else sprite(e.isPlayer ? g.hero : e.art??e.sprite, e.x, e.y + bob, e.size, e.isPlayer ? e.face < 0 : e.x > g.p.x, e.isPlayer && g.p.invuln > 0 && Math.floor(clock * 18) % 2 ? .45 : e.behavior==='wraith'?.8:1,e.art===undefined?'sprites':'monsters');
     if (e.flash) { ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = .4; if (e.isBoss) drawAtlas(ctx, assets.expedition, e.art, e.x, e.y + bob, e.size); else sprite(e.art??e.sprite, e.x, e.y + bob, e.size, false, .4,e.art===undefined?'sprites':'monsters'); ctx.restore(); }

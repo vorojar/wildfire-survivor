@@ -32,6 +32,7 @@ export class Game {
     this.onEvent = onEvent; this.hero = hero; this.gear = [...gear];
     this.state = 'ready'; this.time = 0; this.kills = 0; this.coins = 0; this.level = 1; this.xp = 0; this.nextXp = 22; this.threatGrowth = 1;
     this.lives = 3; this.revives = 0; this.lootTimer = 0; this.lastBoss = null; this.lifeDryStreak = 0;
+    this.regionEvent=null;this.nextRegionEvent=110;
     this.p = { x: W / 2, y: ORIGIN_Y, hp: 120 + gear[1] * 20, maxHp: 120 + gear[1] * 20, speed: 150 + gear[2] * 10, invuln: 0, face: 1 };
     this.damage = (hero ? 22 : 18) + gear[0] * 4; this.interval = hero ? .27 : .21;
     this.multi = 1; this.pierce = 0; this.magnet = 130 + gear[3] * 15; this.orbits = 0; this.novaPower = 1; this.crit = .16;
@@ -89,6 +90,34 @@ export class Game {
     }
     const e = { ...t, type, x, y, maxHp: t.hp * scale, hp: t.hp * scale, damage: t.damage * (1 + this.distance / 2200 + this.pressure*.35), speed: t.speed * Math.min(2.5, 1 + this.distance / 1800 + this.pressure*.25), cooldown: t.cooldown ? t.cooldown/(1+this.pressure*.3) : undefined, id: ++this.uid, flash: 0, phase: rand(0, 6), orbitHit: 0, attackClock: rand(2, 4) };
     this.enemies.push(e); return e;
+  }
+  spawnElite(type, x, y) {
+    const e=this.spawn(type,x,y), affix=Math.floor(Math.random()*3);
+    e.elite=true;e.affix=['疾行','铁甲','狂暴'][affix];e.maxHp*=2.2;e.hp=e.maxHp;e.size*=1.15;
+    if(affix===0)e.speed*=1.4;
+    if(affix===1)e.armor=Math.min(.6,(e.armor??0)+.2);
+    if(affix===2){e.damage*=1.5;if(e.cooldown)e.cooldown*=.65;}
+    return e;
+  }
+  updateRegionEvent(dt) {
+    if(this.boss)return;
+    if(!this.regionEvent && this.distance>=this.nextRegionEvent){
+      const type=this.zone%3;
+      this.regionEvent={id:this.nextRegionEvent,type,name:['兽潮突围','遗迹守藏','孢子围猎'][type],remaining:30,clock:0,kills:0,goal:type===1?1:8};
+      this.nextRegionEvent=this.distance+260;this.onEvent('region',`${this.regionEvent.name} · 击败标记敌人赢取宝箱`);
+    }
+    const event=this.regionEvent;if(!event)return;
+    if(event.kills>=event.goal){
+      this.drop(this.p.x,this.p.y-70,1,'chest');for(let i=0;i<10;i++)this.drop(this.p.x+rand(-40,40),this.p.y-70+rand(-30,30),3);
+      this.onEvent('region',`${event.name}完成 · 宝箱与赏金已出现`);this.regionEvent=null;return;
+    }
+    event.remaining-=dt;event.clock-=dt;
+    if(event.remaining<=0){this.onEvent('region',`${event.name}结束 · 下次再挑战`);this.regionEvent=null;return;}
+    if(event.clock<=0){
+      event.clock=event.type===1?100:7;
+      if(event.type===1){const e=this.spawnElite(8);e.eventId=event.id;}
+      else for(let i=0;i<6&&this.enemies.length<130;i++){const e=this.spawn(event.type===0?(i%2?4:1):(i%2?11:10));e.eventId=event.id;}
+    }
   }
   spawnBoss() {
     if (this.boss) return null;
@@ -171,6 +200,8 @@ export class Game {
     this.texts.push({ x: e.x + rand(-8, 8), y: e.y - 15, text: Math.round(damage), color: crit ? '#ffe67a' : '#edf8d9', life: .5, big: crit });
     this.burst(e.x, e.y, e.color, 3);
     if (e.hp > 0) return;
+    if(this.regionEvent && e.eventId===this.regionEvent.id)this.regionEvent.kills++;
+    if(e.elite){this.drop(e.x,e.y,1,'chest');for(let i=0;i<6;i++)this.drop(e.x+rand(-22,22),e.y+rand(-22,22),2);}
     this.kills++; this.combo++; this.comboClock = 2; this.onEvent('kill'); this.burst(e.x, e.y, e.color, e.type === 3 ? 35 : 12);
     if (e.isBoss) { this.finishBoss(e); return; }
     const n = e.type === 3 ? 10 : e.type === 2 ? 3 : 1;
@@ -191,10 +222,17 @@ export class Game {
     }
     this.enemyShots = this.enemyShots.filter(b => Math.hypot(b.x - this.p.x, b.y - this.p.y) > 245); this.onEvent('nova'); return true;
   }
+  get availableUpgrades() {
+    return upgrades.filter(u => !(u.id==='multi'&&this.multi>=7&&(this.levels.multi??0)>=1) && !(u.id==='orbit'&&this.orbits>=5&&(this.levels.orbit??0)>=3)).map(u=>{
+      if(u.id==='multi'&&this.multi>=7)return {...u,desc:'弹幕数量已满；完成散射协议进化条件',tag:'进化补全'};
+      if(u.id==='orbit'&&this.orbits>=5)return {...u,desc:'护卫数量已满；推进电磁风暴进化条件',tag:'进化补全'};
+      return u;
+    });
+  }
   checkLevel() {
     if (this.xp < this.nextXp || this.state !== 'playing') return;
     this.xp -= this.nextXp; this.level++; this.nextXp = Math.round(this.nextXp * 1.35 + 9);
-    const pool = upgrades.filter(u => !(u.id === 'multi' && this.multi >= 7) && !(u.id === 'orbit' && this.orbits >= 5));
+    const pool = this.availableUpgrades;
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     this.choices = pool.slice(0, 3); this.state = 'upgrade'; this.onEvent('level');
   }
@@ -208,11 +246,11 @@ export class Game {
     if (this.state !== 'upgrade' || !this.choices.some(x => x.id === id)) return false;
     if (id === 'power') this.damage *= 1.3;
     if (id === 'speed') this.interval = Math.max(.065, this.interval * .82);
-    if (id === 'multi') this.multi++;
+    if (id === 'multi') this.multi=Math.min(7,this.multi+1);
     if (id === 'pierce') this.pierce++;
     if (id === 'heal') { this.p.maxHp += 20; this.p.hp = Math.min(this.p.maxHp, this.p.hp + this.p.maxHp * .5); }
     if (id === 'magnet') { this.magnet += 55; this.p.speed = Math.min(320, this.p.speed * 1.08); }
-    if (id === 'orbit') this.orbits++;
+    if (id === 'orbit') this.orbits=Math.min(5,this.orbits+1);
     if (id === 'nova') this.novaPower += .5;
     this.levels[id] = (this.levels[id] ?? 0) + 1; this.state = 'playing'; this.choices = []; this.onEvent('choose'); this.checkEvolutions(); return true;
   }
@@ -254,6 +292,7 @@ export class Game {
     this.comboClock -= dt; if (this.comboClock <= 0) this.combo = 0;
     for(const buff of Object.keys(this.buffs))this.buffs[buff]=Math.max(0,this.buffs[buff]-dt);
     this.updateWorld(dt, input);
+    this.updateRegionEvent(dt);
     if (!this.boss && (this.distance >= this.nextBossDistance || this.time >= this.nextBossTime)) this.spawnBoss();
     this.spawnClock -= dt;
     if (this.spawnClock <= 0) {
@@ -261,7 +300,7 @@ export class Game {
       const count = this.boss ? 1 : Math.min(5, 1 + Math.floor(this.time / 50 + this.distance / 350 + this.pressure));
       for (let i = 0; i < count; i++) if (this.enemies.length < 130) this.spawn(enemyForZone(Math.floor(distanceAt(p.y)/380)));
     }
-    if (this.time >= this.nextElite) { if (!this.boss) this.spawn(3); this.nextElite += 40/(1+this.pressure*.6); }
+    if (this.time >= this.nextElite) { if (!this.boss) this.spawnElite(enemyForZone(this.zone)); this.nextElite += 40/(1+this.pressure*.6); }
     this.shootClock -= dt; this.shotgunClock -= dt;
     let target = null, nearest = Infinity;
     for (const e of this.enemies) { if (e.hp <= 0) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < nearest) { nearest = d; target = e; } }

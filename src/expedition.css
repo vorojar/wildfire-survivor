@@ -40,3 +40,5 @@
 .relic-overlay .level-burst .atlas-sprite{width:58px;height:48px}
 
 .save-conflict{z-index:40;background:#08150ff5}
+
+.pause-actions{display:flex;justify-content:center;gap:12px}.pause-actions .secondary{font-size:12px;padding:8px 12px}.abandon-overlay{z-index:35;background:#0b1812f5}.region-event-hud{position:absolute;top:112px;right:14px;display:flex;flex-direction:column;gap:3px;padding:6px 9px;border:1px solid #7bded755;border-radius:5px;background:#102723e8;color:#a4e5d9;font-size:10px;pointer-events:none}.region-event-hud span{font-size:9px;color:#b6c8b6}@media(max-width:600px){.region-event-hud{top:99px;right:10px;font-size:9px}.region-event-hud span{font-size:8px}}

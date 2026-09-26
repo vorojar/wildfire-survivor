@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Game,W,H} from './game.js';
-import {captureRun,restoreRun,writeProgress} from './run-save.js';
+import {captureRun,restoreRun,writeProgress,SaveConflictError} from './run-save.js';
 import {bossRewards} from './bosses.js';
 import { World, ORIGIN_Y, distanceAt, biomeAt, biomeBlendAt } from './world.js';
 import { enemyForZone, updateEnemy } from './enemies.js';
@@ -45,7 +45,7 @@ test('a long expedition cycles all bosses and keeps world/combat memory bounded'
   assert.equal(bosses.size,3);assert.ok(g.bossKills>=6);assert.ok(g.distance>3000);assert.ok(g.kills>500);assert.ok(g.bullets.length<500);assert.ok(g.particles.length<=500);assert.ok(g.drops.length<=500);assert.ok(g.world.chunks.size<=5);assert.ok(Number.isFinite(g.p.hp));
 });
 
-function isolated(){const g=new Game();g.start();g.enemies=[];g.spawnClock=1e6;g.nextBossTime=1e6;g.nextBossDistance=1e6;g.nextElite=1e6;return g;}
+function isolated(){const g=new Game();g.start();g.enemies=[];g.spawnClock=1e6;g.nextBossTime=1e6;g.nextBossDistance=1e6;g.nextElite=1e6;g.nextRegionEvent=1e6;return g;}
 function grant(g,id){g.state='upgrade';g.choices=[{id}];assert.equal(g.choose(id),true);}
 
 test('three lives revive twice in place with protection; the third death ends the run once',()=>{
@@ -95,11 +95,11 @@ test('a complete expedition restores boss references, bullet hits, lives, world 
 
 test('atomic profile plus run save does not duplicate collected gold and rejects corrupt snapshots',()=>{
   const g=isolated();g.coins=12;g.lives=2;let value;
-  writeProgress({setItem:(key,json)=>{assert.equal(key,'wildfire-save');value=json;}},{bank:112,gear:[0,0,0,0]},g);
+  writeProgress({getItem:()=>null,setItem:(key,json)=>{assert.equal(key,'wildfire-save');value=json;}},{bank:112,gear:[0,0,0,0]},g);
   const saved=JSON.parse(value),restored=restoreRun(new Game(),saved.run);
   assert.equal(saved.bank,112);assert.equal(restored.coins,12);restored.pause();restored.collectDrops(0);assert.equal(restored.coins,12);
   saved.run.data.lives=0;assert.throws(()=>restoreRun(new Game(),saved.run),/存档/);
-  assert.throws(()=>writeProgress({setItem:()=>{throw new Error('quota');}},{},g),/quota/);
+  assert.throws(()=>writeProgress({getItem:()=>null,setItem:()=>{throw new Error('quota');}},{},g),/quota/);
 });
 
 test('evolution guidance tracks run choices, previews the finishing choice and matches real evolution',()=>{
@@ -284,4 +284,60 @@ test('consumables heal, attract, boost fire, absorb hits and bomb kills retain t
   const oldXp=g.xp;g.drop(g.p.x,g.p.y,1,'chest');g.collectDrops(0);assert.ok(g.coins>=30);assert.equal(g.xp,oldXp);assert.ok(g.drops.some(d=>['magnet','haste','shield'].includes(d.type)));
   g.drops=[];g.drop(g.p.x,g.p.y-700,1,'xp');g.collectDrops(.05);assert.ok(g.drops[0].y>g.p.y-700);
   g.pause();g.update(.05);assert.equal(g.buffs.haste,12);
+});
+
+
+test('stale home writes are rejected before storage events and lobby saves retain the expedition',()=>{
+  let raw=null;const storage={getItem:()=>raw,setItem:(_,value)=>{raw=value;}};
+  const profile={bank:100,gear:[0,0,0,0]},active=isolated();active.time=123;active.lives=2;
+  active.spawn(0,100,100);
+  const saved=writeProgress(storage,profile,active),before=raw;
+  assert.throws(()=>writeProgress(storage,{bank:0,gear:[0,0,0,0]},new Game()),SaveConflictError);
+  assert.equal(raw,before);
+  const lobby=writeProgress(storage,{...saved,audio:{music:.5,fx:.7}},new Game());
+  assert.equal(lobby.bank,100);assert.equal(lobby.run.data.time,123);assert.equal(lobby.run.data.lives,2);
+  const resumed=restoreRun(new Game(),lobby.run);
+  assert.equal(resumed.time,123);assert.equal(resumed.lives,2);
+  resumed.p.hp=1;assert.notEqual(active.p.hp,1);
+  const abandoned=writeProgress(storage,{...lobby,run:null},new Game());
+  assert.equal(abandoned.run,null);assert.equal(abandoned.bank,100);
+  assert.throws(()=>writeProgress(storage,lobby,active),SaveConflictError);
+});
+
+test('relic-capped weapons still offer the missing evolution choices without exceeding caps',()=>{
+  const g=isolated();
+  for(let i=0;i<3;i++){g.state='relic';g.choices=[{id:'reactor'}];g.chooseRelic('reactor');}
+  grant(g,'orbit');grant(g,'orbit');grant(g,'nova');
+  assert.equal(g.orbits,5);assert.equal(g.evolved.has('storm'),false);
+  assert.equal(g.availableUpgrades.find(u=>u.id==='orbit').tag,'进化补全');
+  grant(g,'orbit');assert.equal(g.orbits,5);assert.equal(g.evolved.has('storm'),true);
+  assert.equal(g.availableUpgrades.some(u=>u.id==='orbit'),false);
+  for(let i=0;i<6;i++){g.state='relic';g.choices=[{id:'barrage'}];g.chooseRelic('barrage');}
+  for(let i=0;i<3;i++)grant(g,'shotgun');
+  assert.equal(g.availableUpgrades.find(u=>u.id==='multi').tag,'进化补全');
+  grant(g,'multi');assert.equal(g.multi,7);assert.equal(g.evolved.has('blast'),true);
+});
+
+test('older saved expeditions migrate regional event fields without losing weapons or lives',()=>{
+  const g=isolated();g.distance=520;g.lives=2;grant(g,'power');
+  const old=JSON.parse(JSON.stringify(captureRun(g)));delete old.data.regionEvent;delete old.data.nextRegionEvent;
+  const restored=restoreRun(new Game(),old);
+  assert.equal(restored.distance,520);assert.equal(restored.lives,2);assert.equal(restored.levels.power,1);
+  assert.equal(restored.regionEvent,null);assert.equal(restored.nextRegionEvent,610);
+});
+
+test('regional challenges reward only completed targets, survive saves and pause during bosses',()=>{
+  for(let zone=0;zone<3;zone++){
+    const g=isolated();g.zone=zone;g.distance=120+zone*380;g.nextRegionEvent=g.distance;g.updateRegionEvent(.01);
+    assert.equal(g.regionEvent.type,zone);const event=g.regionEvent;
+    const restored=restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g))));
+    assert.deepEqual(restored.regionEvent,event);
+    g.spawnBoss();const remaining=event.remaining;g.updateRegionEvent(5);assert.equal(event.remaining,remaining);g.boss=null;
+    while(event.kills<event.goal){for(const e of [...g.enemies])if(e.eventId===event.id)g.hit(e,1e9);if(event.kills<event.goal){event.clock=0;g.updateRegionEvent(.01);}}
+    const chests=g.drops.filter(d=>d.type==='chest').length;g.updateRegionEvent(.01);
+    assert.equal(g.regionEvent,null);assert.equal(g.drops.filter(d=>d.type==='chest').length,chests+1);
+    const count=g.drops.length;g.updateRegionEvent(20);assert.equal(g.drops.length,count);
+  }
+  const expired=isolated();expired.distance=120;expired.nextRegionEvent=110;expired.updateRegionEvent(.01);expired.updateRegionEvent(31);
+  assert.equal(expired.regionEvent,null);assert.equal(expired.drops.length,0);
 });
