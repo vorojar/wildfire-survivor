@@ -30,15 +30,16 @@ function hazardPath(ctx, h) {
   else { const angle = Math.atan2(h.ty - h.y, h.tx - h.x), dx = Math.sin(angle) * h.radius, dy = -Math.cos(angle) * h.radius; ctx.moveTo(h.x + dx, h.y + dy); ctx.lineTo(h.tx + dx, h.ty + dy); ctx.lineTo(h.tx - dx, h.ty - dy); ctx.lineTo(h.x - dx, h.y - dy); ctx.closePath(); }
 }
 export function drawGame(ctx, g, assets, clock) {
-  ctx.clearRect(0, 0, W, H); ctx.save();
+  const height = g.viewHeight;
+  ctx.clearRect(0, 0, W, height); ctx.save();
   if (g.shake) ctx.translate((Math.random() - .5) * g.shake, (Math.random() - .5) * g.shake);
-  const camera = g.state === 'ready' ? 0 : g.cameraY;
-  if (g.state === 'ready' && ready(assets.arena)) ctx.drawImage(assets.arena, 0, 0, W, H);
+  const camera = g.cameraY;
+  if (g.state === 'ready' && ready(assets.arena)) ctx.drawImage(assets.arena, 0, 0, W, height);
   else for (const chunk of g.world.chunks.values()) {
-    const y = chunk.top - camera;if(y>H||y+H<0)continue;const tile=terrainTile(chunk,assets);
+    const y = chunk.top - camera;if(y>height||y+H<0)continue;const tile=terrainTile(chunk,assets);
     if(tile)ctx.drawImage(tile,0,y,W,H+1);
   }
-  for (let i = 0; i < 16; i++) { ctx.fillStyle = `rgba(204,237,144,${.15 + .15 * Math.sin(clock + i)})`; ctx.beginPath(); ctx.arc((i * 113 + Math.sin(clock * .2 + i) * 18) % W, (i * 137 + clock * 8) % H, 1.1, 0, Math.PI * 2); ctx.fill(); }
+  for (let i = 0; i < 16; i++) { ctx.fillStyle = `rgba(204,237,144,${.15 + .15 * Math.sin(clock + i)})`; ctx.beginPath(); ctx.arc((i * 113 + Math.sin(clock * .2 + i) * 18) % W, (i * 137 + clock * 8) % height, 1.1, 0, Math.PI * 2); ctx.fill(); }
   ctx.translate(0, -camera);
   const sprite = (id, x, y, size, flip = false, alpha = 1, sheet='sprites') => {
     const img = assets[sheet]; if (!ready(img)) return; const cw = img.naturalWidth / 3, ch = img.naturalHeight / 3;
@@ -47,7 +48,7 @@ export function drawGame(ctx, g, assets, clock) {
   };
   const bar = (x, y, width, ratio, color) => { ctx.fillStyle = '#07100ddd'; ctx.fillRect(x - width / 2 - 1, y - 1, width + 2, 5); ctx.fillStyle = color; ctx.fillRect(x - width / 2, y, width * Math.max(0, ratio), 3); };
   if (g.state !== 'ready') for (const s of g.world.supplies()) {
-    if (Math.abs(s.y - g.p.y) > H) continue;
+    if (Math.abs(s.y - g.p.y) > height) continue;
     ctx.strokeStyle = '#aaf08288'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(s.x, s.y + 15, 35, 13, 0, 0, Math.PI * 2); ctx.stroke();
     sprite(6, s.x, s.y - 4 + Math.sin(clock * 2) * 3, 48,false,1,'loot');
     ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#c6e9b4'; ctx.fillText('补给箱 · 治疗 / 道具', s.x, s.y + 42);
@@ -56,20 +57,21 @@ export function drawGame(ctx, g, assets, clock) {
     for (const y of [g.bossGate - 250, g.bossGate + 250]) { ctx.strokeStyle = '#e2966599'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); ctx.setLineDash([]); }
   }
   for (const h of g.hazards) {
+    if (!h.bossAttack) continue;
     const warning = h.age < h.warn;
     ctx.save(); ctx.fillStyle = warning ? '#ed725333' : h.poison ? '#51ce9960' : '#ff965a8a'; ctx.strokeStyle = warning ? '#ffb483' : h.color; ctx.lineWidth = warning ? 2 : 4;
     if (warning) ctx.setLineDash([7, 5]); hazardPath(ctx, h); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
     if (warning) { ctx.fillStyle = '#ffdbb2'; ctx.textAlign = 'center'; ctx.font = 'bold 15px sans-serif'; ctx.fillText('!', h.shape === 'line' ? (h.x + h.tx) / 2 : h.x, h.shape === 'line' ? (h.y + h.ty) / 2 : h.y); }
     ctx.restore();
   }
-  for (const d of g.drops) if (Math.abs(d.y - g.p.y) < H) {
+  for (const d of g.drops) if (Math.abs(d.y - g.p.y) < height) {
     const y=d.y+Math.sin(clock*5+d.phase)*2,item=lootTypes[d.type];
     if(d.type==='coin')sprite(6,d.x,y,18);
     else {sprite(item.art,d.x,y,d.type==='xp'?15:33,false,1,'loot');if(d.type!=='xp'){ctx.font='8px sans-serif';ctx.textAlign='center';ctx.fillStyle=item.color;ctx.fillText(item.name,d.x,y+25);}}
   }
   const units = [...g.enemies.map(e => ({ ...e, isPlayer: false })), { ...g.p, isPlayer: true, size: 62 }].sort((a, b) => a.y - b.y);
   for (const e of units) {
-    if (e.y - camera < -100 || e.y - camera > H + 100) continue;
+    if (e.y - camera < -100 || e.y - camera > height + 100) continue;
     ctx.fillStyle = '#030a0860'; ctx.beginPath(); ctx.ellipse(e.x, e.y + e.size * .32, e.size * .3, e.size * .13, 0, 0, Math.PI * 2); ctx.fill();
     const bob = Math.sin(clock * (e.type === 1 ? 12 : 7) + (e.phase ?? 0)) * 2;
     if (e.isBoss) drawAtlas(ctx, assets.expedition, e.art, e.x, e.y + bob, e.size, e.x > g.p.x);
@@ -80,12 +82,26 @@ export function drawGame(ctx, g, assets, clock) {
     if((e.isBoss&&e.shieldTime>0)||(e.isPlayer&&g.buffs.shield>0&&g.shieldCharges>0)){ctx.strokeStyle='#9deaffb0';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(e.x,e.y,e.size*.55,e.size*.6,0,0,Math.PI*2);ctx.stroke();}
   }
   for (const b of g.bullets) { ctx.strokeStyle = b.crit ? '#fff4bf' : b.color; ctx.lineWidth = b.shotgun ? 4 : b.crit ? 4 : 2.6; ctx.shadowColor = b.color; ctx.shadowBlur = 9; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * .017, b.y - b.vy * .017); ctx.stroke(); } ctx.shadowBlur = 0;
-  for (const b of g.enemyShots) { ctx.fillStyle = b.color; ctx.shadowBlur = 10; ctx.shadowColor = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff1fc'; ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, Math.PI * 2); ctx.fill(); } ctx.shadowBlur = 0;
+  // Hostile shots share a warm, pointed silhouette in every biome.
+  for (const b of g.enemyShots) {
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+    ctx.strokeStyle = '#ff563e88'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(-19, 0); ctx.stroke();
+    ctx.fillStyle = '#ff533c'; ctx.strokeStyle = '#ffe0a8'; ctx.lineWidth = 1.5; ctx.shadowBlur = 8; ctx.shadowColor = '#ff3d27';
+    ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -5); ctx.lineTo(-2, 0); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  const storm = g.evolved.has('storm'), orbitRadius = storm ? 99 : 77;
+  if (g.orbits) {
+    ctx.strokeStyle = '#63eaff38'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(g.p.x, g.p.y, orbitRadius, 0, Math.PI * 2); ctx.stroke();
+  }
   for (let i = 0; i < g.orbits; i++) {
-    const storm = g.evolved.has('storm'), a = g.time * (storm ? 4 : 2.8) + i * Math.PI * 2 / g.orbits;
-    const x = g.p.x + Math.cos(a) * (storm ? 99 : 77), y = g.p.y + Math.sin(a) * (storm ? 99 : 77);
-    if (storm) drawAtlas(ctx, assets.expedition, 5, x, y, 32);
-    else { ctx.fillStyle = '#c7f78e'; ctx.shadowBlur = 17; ctx.shadowColor = '#a4ee6b'; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill(); }
+    const a = g.time * (storm ? 4 : 2.8) + i * Math.PI * 2 / g.orbits;
+    const x = g.p.x + Math.cos(a) * orbitRadius, y = g.p.y + Math.sin(a) * orbitRadius;
+    ctx.strokeStyle = '#66eaff99'; ctx.lineWidth = storm ? 3 : 2; ctx.beginPath(); ctx.arc(g.p.x, g.p.y, orbitRadius, a - .6, a); ctx.stroke();
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.shadowBlur = 12; ctx.shadowColor = '#54dfff';
+    ctx.fillStyle = '#133c58'; ctx.strokeStyle = '#8af3ff'; ctx.lineWidth = 2; ctx.beginPath();
+    const radius = storm ? 13 : 10;
+    for (let j = 0; j < 6; j++) { const angle = j * Math.PI / 3; if (j) ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); else ctx.moveTo(radius, 0); }
+    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#e0fdff'; ctx.fillRect(-3, -3, 6, 6); ctx.restore();
   } ctx.shadowBlur = 0;
   for (const arc of g.arcs) { ctx.strokeStyle = '#a3faff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(arc.x, arc.y); ctx.lineTo((arc.x + arc.tx) / 2 + 8, (arc.y + arc.ty) / 2 - 8); ctx.lineTo(arc.tx, arc.ty); ctx.stroke(); }
   for (const p of g.particles) { ctx.globalAlpha = Math.min(1, p.life * 3); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); } ctx.globalAlpha = 1;

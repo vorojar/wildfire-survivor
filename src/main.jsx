@@ -45,7 +45,20 @@ function App(){
     window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',blur);document.addEventListener('visibilitychange',visibility);
     return()=>{cancelAnimationFrame(raf);clearTimeout(toastTimer.current);window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);document.removeEventListener('visibilitychange',visibility);sound.current?.dispose();};
   },[]);
-  function start(){sound.current.unlock();if(gameRef.current.state!=='ready')makeGame();gameRef.current.start();setTab('battle');setAudioOpen(false);tick(n=>n+1);}
+  useEffect(()=>{
+    if(!game || !canvas.current)return;
+    const surface=canvas.current, arena=surface.parentElement;
+    const resize=()=>{
+      const {width,height}=arena.getBoundingClientRect();
+      if(!width || !height)return;
+      const logicalHeight=Math.round(W*height/width);
+      if(surface.height!==logicalHeight)surface.height=logicalHeight;
+      game.resizeViewport(logicalHeight);
+    };
+    const observer=new ResizeObserver(resize);observer.observe(arena);resize();
+    return()=>observer.disconnect();
+  },[game]);
+  function start(){sound.current.unlock();if(gameRef.current.state!=='ready')makeGame();gameRef.current.resizeViewport(canvas.current.height);gameRef.current.start();setTab('battle');setAudioOpen(false);tick(n=>n+1);}
   function changeHero(hero){if(game.state!=='ready')return;persist({...saveRef.current,hero});makeGame(hero);}
   function openTab(t){if(t==='armory'&&game.state==='playing')game.pause();setTab(t);}
   function buy(i){const price=80+save.gear[i]*60;if(save.gear[i]>=10)return;if(save.bank<price){notify('金币不足，去战场再收集一些吧');return;}const gear=[...save.gear];gear[i]++;persist({...saveRef.current,bank:saveRef.current.bank-price,gear});if(game.state==='ready')makeGame();notify('强化成功 · 新属性将在下一局生效');}

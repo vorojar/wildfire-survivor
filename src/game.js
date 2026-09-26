@@ -15,7 +15,7 @@ export const upgrades = [
   { id: 'pierce', name: '穿甲弹', desc: '子弹额外穿透 1 个敌人', icon: 'MoveUpRight', tag: '群体杀伤' },
   { id: 'heal', name: '战地补给', desc: '恢复 50% 生命，生命上限 +20', icon: 'Heart', tag: '生存强化' },
   { id: 'magnet', name: '磁力核心', desc: '拾取范围 +55，移动速度 +8%', icon: 'Magnet', tag: '装备升级' },
-  { id: 'orbit', name: '电磁护卫', desc: '增加 1 枚环绕攻击的能量球', icon: 'Orbit', tag: '自动武器' },
+  { id: 'orbit', name: '电磁护卫', desc: '增加 1 枚青蓝色环绕护卫', icon: 'Orbit', tag: '自动武器' },
   { id: 'nova', name: '过载脉冲', desc: '冲击波伤害 +50%，冷却缩短', icon: 'Radio', tag: '技能升级' },
 ];
 export const timeText = t => `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
@@ -34,7 +34,7 @@ export class Game {
     this.hazards = []; this.enemyShots = []; this.relics = []; this.evolved = new Set();
     this.spawnClock = 0; this.shootClock = 0; this.shotgunClock = 0; this.nextElite = 40;
     this.novaCooldown = 0; this.shake = 0; this.combo = 0; this.comboClock = 0; this.uid = 0; this.choices = []; this.lastAim = 0; this.levels = {};
-    this.world = new World(); this.world.update(this.p.y); this.cameraY = 0;
+    this.world = new World(); this.world.update(this.p.y); this.cameraY = 0; this.viewHeight = H;
     this.distance = 0; this.zone = 0; this.biome = biomeAt(this.p.y); this.autoAdvance = false;
     this.boss = null; this.bossKills = 0; this.bossIndex = 0; this.bossGate = null; this.nextBossDistance = 220; this.nextBossTime = 55;
     for (let i = 0; i < 10; i++) { const a = i * 2.4; this.spawn(i % 3, W / 2 + Math.cos(a) * 165, H / 2 + Math.sin(a) * 260); }
@@ -52,12 +52,16 @@ export class Game {
     ];
   }
   start() { this.state = 'playing'; this.enemies = []; this.drops = []; for (let i = 0; i < 8; i++) this.spawn(enemyForZone(0)); this.onEvent('start'); }
+  resizeViewport(height) {
+    this.viewHeight = height;
+    this.cameraY = this.p.y - height * .52;
+  }
   spawn(type, x, y) {
     const t = enemyTypes[type], scale = this.difficulty;
     if (x === undefined) {
       const edge = Math.floor(rand(0, 4));
       x = edge === 0 ? -24 : edge === 1 ? W + 24 : rand(25, W - 25);
-      y = this.cameraY + (edge === 2 ? -24 : edge === 3 ? H + 24 : rand(65, H - 50));
+      y = this.cameraY + (edge === 2 ? -24 : edge === 3 ? this.viewHeight + 24 : rand(65, this.viewHeight - 50));
     }
     const e = { ...t, type, x, y, maxHp: t.hp * scale, hp: t.hp * scale, damage: t.damage * (1 + this.distance / 2200), speed: t.speed * Math.min(2.5, 1 + this.distance / 1800), id: ++this.uid, flash: 0, phase: rand(0, 6), orbitHit: 0, attackClock: rand(2, 4) };
     this.enemies.push(e); return e;
@@ -165,12 +169,12 @@ export class Game {
     if (moving) this.autoAdvance = false;
     const iy = moving ? input.y : this.autoAdvance ? -1 : 0, length = Math.max(1, Math.hypot(input.x, iy));
     const speed = p.speed * (this.buffs.haste > 0 ? 1.15 : 1);
-    p.x = clamp(p.x + input.x / length * speed * dt, 25, W - 25); p.y = Math.min(ORIGIN_Y + 160, p.y + iy / length * speed * dt);
+    p.x = clamp(p.x + input.x / length * speed * dt, 25, W - 25); p.y += iy / length * speed * dt;
     if (this.bossGate !== null) p.y = clamp(p.y, this.bossGate - 235, this.bossGate + 235);
     if (input.x) p.face = input.x > 0 ? 1 : -1;
     this.distance = Math.max(this.distance, distanceAt(p.y)); this.zone = Math.floor(this.distance / 380);
     const biome = biomeAt(p.y); if (biome !== this.biome) { this.biome = biome; this.onEvent('biome', biome.name); }
-    this.cameraY = p.y - ORIGIN_Y; this.world.update(p.y);
+    this.cameraY = p.y - this.viewHeight * .52; this.world.update(p.y);
     for (const supply of this.world.supplies()) {
       if (Math.hypot(supply.x - p.x, supply.y - p.y) < 48 && this.world.collect(supply.id)) {
         p.hp = Math.min(p.maxHp, p.hp + p.maxHp * .35); this.novaCooldown = 0;

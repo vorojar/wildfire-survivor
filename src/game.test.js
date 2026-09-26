@@ -6,12 +6,12 @@ import { enemyForZone, updateEnemy } from './enemies.js';
 import { bossTypes, updateBoss, updateHazards, hazardContains } from './bosses.js';
 import { Sound } from './audio.js';
 
-test('movement stays in arena and diagonal movement is normalized',()=>{
-  const a=new Game(),b=new Game();a.start();b.start();a.spawnClock=b.spawnClock=1000;
+test('movement stays within horizontal bounds and diagonal movement is normalized',()=>{
+  const a=isolated(),b=isolated();
   const x=a.p.x,y=a.p.y;a.update(.05,{x:1,y:0});b.update(.05,{x:1,y:1});
   assert.ok(Math.abs(Math.hypot(b.p.x-x,b.p.y-y)-(a.p.x-x))<.0001);
   for(let i=0;i<500;i++)a.update(.05,{x:1,y:1});
-  assert.ok(a.p.x<=W-25&&a.p.y<=H-45);
+  assert.equal(a.p.x,W-25);assert.ok(a.p.y>H);
 });
 test('a fast bullet crosses and kills an enemy, drops coins, and awards only once',()=>{
   const g=new Game();g.start();g.enemies=[];g.spawnClock=100;g.shootClock=100;
@@ -45,6 +45,36 @@ test('a long expedition cycles all bosses and keeps world/combat memory bounded'
 
 function isolated(){const g=new Game();g.start();g.enemies=[];g.spawnClock=1e6;g.nextBossTime=1e6;g.nextBossDistance=1e6;g.nextElite=1e6;return g;}
 function grant(g,id){g.state='upgrade';g.choices=[{id}];assert.equal(g.choose(id),true);}
+
+test('starting southward can reach and collect items beyond the former invisible boundary',()=>{
+  const g=isolated();g.p.hp=50;g.drop(g.p.x,ORIGIN_Y+450,35,'heal');
+  for(let i=0;i<60;i++)g.update(.05,{x:0,y:1});
+  assert.ok(g.p.y>ORIGIN_Y+400);assert.equal(g.p.hp,85);assert.equal(g.drops.length,0);
+  assert.equal(g.distance,0);assert.equal(g.biome.name,'迷雾森林');
+  for(let i=0;i<60;i++)g.update(.05,{x:0,y:-1});
+  assert.ok(Math.abs(g.p.y-ORIGIN_Y)<1e-8);assert.ok(g.world.chunks.size<=5);
+});
+
+test('phone viewport resize preserves world position, camera framing and offscreen spawns',()=>{
+  const g=isolated(), y=g.p.y;
+  for(const height of [980,680,H]){
+    g.resizeViewport(height);assert.equal(g.p.y,y);assert.equal(g.distance,0);
+    assert.ok(Math.abs(g.p.y-g.cameraY-height*.52)<1e-8);
+    for(let i=0;i<30;i++){
+      const e=g.spawn(0),screenY=e.y-g.cameraY;
+      assert.ok(e.x<0||e.x>W||screenY<0||screenY>height);
+    }
+  }
+});
+
+test('ordinary charges cannot hurt along their future path before making contact',()=>{
+  const g=isolated(), wolf=g.spawn(4,g.p.x,g.p.y-180);wolf.attackClock=0;
+  updateEnemy(g,wolf,.01);const hp=g.p.hp;
+  updateHazards(g,.86);assert.ok(wolf.dash);assert.equal(g.p.hp,hp);
+  g.shootClock=1e6;
+  for(let i=0;i<10;i++)g.update(.05);
+  assert.ok(g.p.hp<hp);
+});
 
 test('northward travel scrolls camera without an upper boundary and backtracking cannot lower difficulty',()=>{
   const g=isolated();for(let i=0;i<1200;i++)g.update(.05,{x:0,y:-1});

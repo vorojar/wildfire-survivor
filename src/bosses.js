@@ -23,7 +23,7 @@ export function updateBoss(game, boss, dt) {
   boss.attackClock = (boss.bossType === 2 ? 3.5 : 4.1) - boss.phaseLevel * .6;
   const attack = boss.attackCount++;
   const angle = Math.atan2(game.p.y - boss.y, game.p.x - boss.x);
-  const base = { owner: boss.id, color: boss.color, age: 0, damage: 30 + boss.phaseLevel * 5, active: .45 };
+  const base = { owner: boss.id, bossAttack: true, color: boss.color, age: 0, damage: 30 + boss.phaseLevel * 5, active: .45 };
   if (boss.bossType === 0 && attack % 2 === 1) {
     boss.intent = '扇形重击';
     game.hazards.push({ ...base, shape: 'cone', x: boss.x, y: boss.y, angle, spread: 1.15, radius: 190, warn: 1.2, damage: 30 });
@@ -75,7 +75,8 @@ export function updateHazards(game, dt) {
       }
       game.onEvent('impact');
     }
-    if (!h.shotCount && hazardContains(h, game.p)) game.hurt(h.damage);
+    // Ordinary charging enemies deal contact damage at their actual position.
+    if (!h.shotCount && (!h.charge || h.bossAttack) && hazardContains(h, game.p)) game.hurt(h.damage);
   }
   game.hazards = game.hazards.filter(h => h.age < h.warn + h.active);
   for (const b of game.enemyShots) {

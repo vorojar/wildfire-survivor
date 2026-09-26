@@ -4,3 +4,17 @@
 .xp-track i{background:#80d4f3;box-shadow:0 0 6px #80d4f355}.buff-hud{position:absolute;bottom:99px;left:16px;right:16px;display:flex;justify-content:center;gap:6px;pointer-events:none}.buff-hud>span{background:#0a181ce0;border:1px solid #81c9dc55;color:#bde5ed;padding:5px 7px;font-size:9px;border-radius:4px}
 @media(max-width:600px){.buff-hud{bottom:83px;gap:4px;left:8px;right:8px}.buff-hud>span{font-size:8px;padding:4px 5px}}
 @media(max-width:360px){.journey-hud>span:last-child{display:none}.upgrade-modal .upgrade-options button{padding:7px}.evolution-panel.compact{margin-bottom:5px}.upgrade-modal>h2{font-size:21px}.evolution-panel.compact h3{display:none}}
+
+/* Use the whole phone viewport; resize the canvas world instead of stretching sprites. */
+@media(max-width:600px){
+  .app{height:100dvh;min-height:0;display:flex;flex-direction:column}
+  .header{flex-shrink:0;height:calc(61px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top)}
+  .layout{flex:1;min-height:0;width:100%;max-width:none;margin:0;padding:6px 6px max(6px,env(safe-area-inset-bottom));display:flex;align-items:stretch}
+  .arena-shell{display:flex;flex-direction:column;width:100%;min-height:0}
+  .arena{flex:1;min-height:0;aspect-ratio:auto}
+  .arena canvas{position:absolute;inset:0}
+  .arena-footer{flex-shrink:0;height:17px}
+  .overlay{overflow-y:auto;align-items:safe center;touch-action:pan-y}
+  .close{top:0}
+  .nova-button small{display:none}
+}
