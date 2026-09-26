@@ -26,10 +26,13 @@ export function EvolutionPanel({ game, compact = false }) {
 export function AdvanceButton({ game, refresh }) {
   return <button className={`advance-button ${game.autoAdvance ? 'advancing' : ''}`} disabled={!!game.boss} aria-label={game.autoAdvance ? '停止自动前进' : '自动向北前进'} onClick={() => { game.autoAdvance = !game.autoAdvance; refresh(); }}><ArrowUp size={20}/><span>{game.boss ? '首领封锁' : game.autoAdvance ? '停止前进' : '向北前进'}</span></button>;
 }
-export function AudioPanel({ audio, mode, onChange, onClose }) {
-  return <section className="audio-panel" aria-label="音频设置"><header><b><Music2 size={17}/>荒野电台</b><button onClick={onClose} aria-label="关闭音频设置"><X size={17}/></button></header><p>当前编曲 · {musicModes[mode].label}</p>
+export function AudioPanel({ audio, mode, status, onRetry, onPreview, onChange, onClose }) {
+  return <section className="audio-panel" aria-label="音频设置"><header><b><Music2 size={17}/>荒野电台</b><button onClick={onClose} aria-label="关闭音频设置"><X size={17}/></button></header><p>重金属 · {musicModes[mode].label} · {musicModes[mode].bpm} BPM</p>
+    {status==='loading'&&<p role="status">正在装载战斗音轨…</p>}
+    {status==='error'&&<p role="status">部分声音加载失败 <button onClick={onRetry}>重新加载</button></p>}
     <label><span>背景音乐 <b>{Math.round(audio.music * 100)}%</b></span><input aria-label="背景音乐音量" type="range" min="0" max="100" value={Math.round(audio.music * 100)} onChange={e => onChange({ ...audio, music: +e.target.value / 100 })}/></label>
-    <label><span>战斗音效 <b>{Math.round(audio.fx * 100)}%</b></span><input aria-label="战斗音效音量" type="range" min="0" max="100" value={Math.round(audio.fx * 100)} onChange={e => onChange({ ...audio, fx: +e.target.value / 100 })}/></label><small>探索 / 兽潮 / 首领 · 随战况自动切换</small>
+    <label><span>战斗音效 <b>{Math.round(audio.fx * 100)}%</b></span><input aria-label="战斗音效音量" type="range" min="0" max="100" value={Math.round(audio.fx * 100)} onChange={e => onChange({ ...audio, fx: +e.target.value / 100 })}/></label>
+    <div className="sound-preview" aria-label="枪声试听">{[['shoot','步枪'],['shotgun','霰弹'],['gatling','机枪']].map(([type,label])=><button key={type} aria-label={`试听${label}`} onClick={()=>onPreview(type)}>{label} ▶</button>)}</div><small>实录枪声 · 探索 / 兽潮 / 首领动态混音</small>
   </section>;
 }
 export function RelicModal({ game, refresh }) {

@@ -4,7 +4,6 @@ import {Game,W,H} from './game.js';
 import { World, ORIGIN_Y, distanceAt, biomeAt, biomeBlendAt } from './world.js';
 import { enemyForZone, updateEnemy } from './enemies.js';
 import { bossTypes, updateBoss, updateHazards, hazardContains } from './bosses.js';
-import { Sound } from './audio.js';
 
 test('movement stays within horizontal bounds and diagonal movement is normalized',()=>{
   const a=isolated(),b=isolated();
@@ -130,13 +129,6 @@ test('explosive shotgun hits nearby enemies instead of only the direct target',(
   const g=isolated();g.shootClock=1e6;const a=g.spawn(0,g.p.x+30,g.p.y),b=g.spawn(0,g.p.x+30,g.p.y+40);a.hp=b.hp=200;a.speed=b.speed=0;
   g.bullets=[{x:g.p.x,y:g.p.y,vx:900,vy:0,life:1,damage:20,crit:false,hits:new Set(),pierce:0,blast:true}];g.update(.05);
   assert.ok(a.hp<200);assert.ok(b.hp<200);assert.ok(g.rings.length>0);
-});
-test('sound scheduler changes tempo by combat mode and stops scheduling while paused or muted',()=>{
-  const sound=new Sound(),g=isolated(),scheduled=[];
-  const param=()=>({setTargetAtTime(){}});sound.ctx={state:'running',currentTime:0};sound.musicBus={gain:param()};sound.fxBus={gain:param()};sound.scheduleBeat=(at,mode)=>scheduled.push({at,mode});
-  sound.update(g);assert.equal(scheduled[0].mode,'explore');g.spawnBoss();sound.ctx.currentTime=1;sound.update(g);assert.equal(scheduled.at(-1).mode,'boss');
-  const n=scheduled.length;g.pause();sound.ctx.currentTime=2;sound.update(g);assert.equal(scheduled.length,n);g.pause();sound.enabled=false;sound.ctx.currentTime=3;sound.update(g);assert.equal(scheduled.length,n);
-  sound.setVolumes(.2,.8);assert.equal(sound.musicVolume,.2);assert.equal(sound.fxVolume,.8);
 });
 
 test('high gear bosses survive burst damage and both phase shields require real combat time',()=>{

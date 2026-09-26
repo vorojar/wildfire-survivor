@@ -5,6 +5,8 @@
 @media(max-width:600px){.buff-hud{bottom:83px;gap:4px;left:8px;right:8px}.buff-hud>span{font-size:8px;padding:4px 5px}}
 @media(max-width:360px){.journey-hud>span:last-child{display:none}.upgrade-modal .upgrade-options button{padding:7px}.evolution-panel.compact{margin-bottom:5px}.upgrade-modal>h2{font-size:21px}.evolution-panel.compact h3{display:none}}
 
+.sound-preview{display:flex;gap:6px;margin:0 0 14px}.sound-preview button{flex:1;padding:7px 3px;border:1px solid #526749;border-radius:4px;background:#213322;color:#c8e3ae;font-size:10px}
+
 /* Use the whole phone viewport; resize the canvas world instead of stretching sprites. */
 @media(max-width:600px){
   .app{height:100dvh;min-height:0;display:flex;flex-direction:column}

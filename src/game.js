@@ -105,7 +105,7 @@ export class Game {
     if(e.isBoss && e.shieldTime>0)return;
     damage *= 1-(e.isBoss?.2:(e.armor??0));
     if(e.isBoss)damage=Math.min(damage,e.maxHp*.045);
-    e.hp -= damage; e.flash = .1;
+    e.hp -= damage; e.flash = .1; this.onEvent('hit');
     if(e.isBoss && e.phaseLevel<2){
       const threshold=e.maxHp*(e.phaseLevel===0?.65:.3);
       if(e.hp<=threshold){e.hp=threshold;e.phaseLevel++;e.shieldTime=3;e.attackClock=.1;this.onEvent('bossPhase',`${e.name} · 护盾重组，准备反击`);}
@@ -113,7 +113,7 @@ export class Game {
     this.texts.push({ x: e.x + rand(-8, 8), y: e.y - 15, text: Math.round(damage), color: crit ? '#ffe67a' : '#edf8d9', life: .5, big: crit });
     this.burst(e.x, e.y, e.color, 3);
     if (e.hp > 0) return;
-    this.kills++; this.combo++; this.comboClock = 2; this.burst(e.x, e.y, e.color, e.type === 3 ? 35 : 12);
+    this.kills++; this.combo++; this.comboClock = 2; this.onEvent('kill'); this.burst(e.x, e.y, e.color, e.type === 3 ? 35 : 12);
     const n = e.isBoss ? 22 : e.type === 3 ? 10 : e.type === 2 ? 3 : 1;
     for (let i = 0; i < n; i++) this.drop(e.x + rand(-20, 20), e.y + rand(-20, 20), (e.type === 3 ? 3 : 1) + Math.floor(this.distance / 600));
     this.drop(e.x,e.y,e.isBoss?24:e.type===3?6:e.splitChild?.5:e.type===2?2:1,'xp');
