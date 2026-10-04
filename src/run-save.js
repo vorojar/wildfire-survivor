@@ -1,6 +1,6 @@
 import { biomeAt } from './world.js';
 
-const omitted = new Set(['onEvent','world','biome','boss','evolved','bullets','particles','texts','rings','arcs']);
+const omitted = new Set(['onEvent','world','biome','boss','evolved','bullets','particles','texts','rings','arcs','upgradeIntro','reviveTimer','novaFx','impactStop']);
 const states = ['playing','paused','upgrade','loot','relic'];
 export class SaveConflictError extends Error {}
 

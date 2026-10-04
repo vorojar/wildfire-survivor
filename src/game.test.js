@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Game,W,H} from './game.js';
+import {equipmentPrice,canUpgradeEquipment,affordableEquipmentCount} from './armory.js';
 import {captureRun,restoreRun,writeProgress,SaveConflictError} from './run-save.js';
 import {bossRewards} from './bosses.js';
 import { World, ORIGIN_Y, distanceAt, biomeAt, biomeBlendAt } from './world.js';
@@ -27,11 +28,12 @@ test('gold persists without granting XP; crystals open upgrades and choices resu
   assert.equal(g.coins,8);assert.equal(g.level,1);assert.equal(g.xp,0);assert.equal(g.state,'playing');assert.ok(events.some(e=>e[0]==='coin'&&e[1]===8));
   g.drop(g.p.x,g.p.y,22,'xp');g.update(.016);assert.equal(g.level,2);assert.equal(g.nextXp,39);assert.equal(g.state,'upgrade');
   const t=g.time;g.update(.05,{x:1,y:0});assert.equal(g.time,t);
+  assert.equal(g.choose(g.choices[0].id),false);for(let i=0;i<20;i++)g.update(.05);
   g.choices=[{id:'power'}];const damage=g.damage;assert.equal(g.choose('power'),true);assert.equal(g.damage,damage*1.3);assert.equal(g.state,'playing');assert.equal(g.choose('power'),false);
 });
 test('pause freezes simulation and nova has a real cooldown',()=>{
   const g=new Game();g.start();g.spawn(0,g.p.x+20,g.p.y);assert.equal(g.nova(),true);assert.ok(g.kills>0);assert.equal(g.nova(),false);
-  g.pause();const time=g.time,cooldown=g.novaCooldown;g.update(.05);assert.equal(g.time,time);assert.equal(g.novaCooldown,cooldown);g.pause();g.update(.05);assert.ok(g.novaCooldown<cooldown);
+  g.pause();const time=g.time,cooldown=g.novaCooldown;g.update(.05);assert.equal(g.time,time);assert.equal(g.novaCooldown,cooldown);g.pause();for(let i=0;i<3;i++)g.update(.05);assert.ok(g.novaCooldown<cooldown);
 });
 test('lethal contact ends run and new game resets run while respecting permanent equipment',()=>{
   const g=new Game({gear:[2,3,1,2]});assert.equal(g.damage,26);assert.equal(g.p.maxHp,180);g.start();g.lives=1;g.p.hp=1;g.spawn(3,g.p.x,g.p.y);g.shootClock=100;g.update(.01);assert.equal(g.state,'dead');assert.equal(g.p.hp,0);
@@ -340,4 +342,37 @@ test('regional challenges reward only completed targets, survive saves and pause
   }
   const expired=isolated();expired.distance=120;expired.nextRegionEvent=110;expired.updateRegionEvent(.01);expired.updateRegionEvent(31);
   assert.equal(expired.regionEvent,null);assert.equal(expired.drops.length,0);
+});
+
+
+test('upgrade presentation freezes combat, blocks accidental picks and saves the pending choices',()=>{
+  const g=isolated();g.xp=g.nextXp;g.checkLevel();const choices=g.choices.map(x=>x.id),time=g.time,x=g.p.x;
+  assert.ok(g.upgradeIntro>0);assert.equal(g.choose(choices[0]),false);
+  for(let i=0;i<8;i++)g.update(.05,{x:1,y:1});assert.equal(g.time,time);assert.equal(g.p.x,x);assert.ok(g.upgradeIntro>0);
+  const restored=restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g))));
+  assert.equal(restored.state,'upgrade');assert.deepEqual(restored.choices.map(x=>x.id),choices);assert.equal(restored.level,2);assert.equal(restored.upgradeIntro,0);
+  for(let i=0;i<12;i++)g.update(.05);assert.equal(g.upgradeIntro,0);assert.equal(g.choose(choices[0]),true);assert.equal(g.state,'playing');
+});
+
+test('revival presentation freezes danger and preserves all four seconds of protection',()=>{
+  const g=isolated();g.p.hp=0;g.resolveDeath();const time=g.time,x=g.p.x;
+  for(let i=0;i<20;i++)g.update(.05,{x:1,y:1});assert.equal(g.time,time);assert.equal(g.p.x,x);assert.equal(g.p.invuln,4);assert.equal(g.lives,2);assert.equal(g.nova(),false);
+  g.pause();const remaining=g.reviveTimer;g.update(.05);assert.equal(g.reviveTimer,remaining);g.pause();
+  for(let i=0;i<10;i++)g.update(.05);assert.equal(g.reviveTimer,0);assert.ok(g.p.invuln>3.8);
+  const restored=restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g))));assert.equal(restored.lives,2);assert.equal(restored.reviveTimer,0);
+});
+
+test('nova impact is brief, clears nearby shots and does not change damage or hit distant targets',()=>{
+  const g=isolated(),near=g.spawn(0,g.p.x+100,g.p.y),far=g.spawn(0,g.p.x+300,g.p.y);
+  near.hp=near.maxHp=1000;far.hp=far.maxHp=1000;g.enemyShots=[{x:g.p.x+30,y:g.p.y},{x:g.p.x+300,y:g.p.y}];
+  assert.equal(g.nova(),true);assert.equal(near.hp,900);assert.equal(far.hp,1000);assert.equal(g.enemyShots.length,1);
+  const t=g.time;g.update(.05);assert.equal(g.time,t);assert.ok(g.novaFx);assert.equal(g.nova(),false);
+  for(let i=0;i<20;i++)g.update(.05);assert.equal(g.novaFx,null);assert.equal(g.impactStop,0);assert.ok(g.time>t);
+});
+
+test('armory notifications follow affordability, purchases and maximum equipment levels',()=>{
+  assert.equal(equipmentPrice(0),80);assert.equal(affordableEquipmentCount(79,[0,0,0,0]),0);
+  assert.equal(affordableEquipmentCount(80,[0,1,2,10]),1);assert.equal(affordableEquipmentCount(140,[0,1,2,10]),2);
+  assert.equal(affordableEquipmentCount(140-equipmentPrice(0),[1,1,2,10]),0);
+  assert.equal(canUpgradeEquipment(10000,10),false);assert.equal(affordableEquipmentCount(10000,[10,10,10,10]),0);
 });

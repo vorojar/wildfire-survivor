@@ -33,6 +33,7 @@ export class Game {
     this.state = 'ready'; this.time = 0; this.kills = 0; this.coins = 0; this.level = 1; this.xp = 0; this.nextXp = 22; this.threatGrowth = 1;
     this.lives = 3; this.revives = 0; this.lootTimer = 0; this.lastBoss = null; this.lifeDryStreak = 0;
     this.regionEvent=null;this.nextRegionEvent=110;
+    this.upgradeIntro=0;this.reviveTimer=0;this.novaFx=null;this.impactStop=0;
     this.p = { x: W / 2, y: ORIGIN_Y, hp: 120 + gear[1] * 20, maxHp: 120 + gear[1] * 20, speed: 150 + gear[2] * 10, invuln: 0, face: 1 };
     this.damage = (hero ? 22 : 18) + gear[0] * 4; this.interval = hero ? .27 : .21;
     this.multi = 1; this.pierce = 0; this.magnet = 130 + gear[3] * 15; this.orbits = 0; this.novaPower = 1; this.crit = .16;
@@ -172,6 +173,7 @@ export class Game {
     this.lives--;this.autoAdvance=false;
     if(this.lives===0){this.state='dead';this.onEvent('dead');return;}
     this.revives++;this.p.hp=this.p.maxHp;this.p.invuln=4;
+    this.reviveTimer=1.4;this.shake=15;
     this.enemyShots=[];this.hazards=[];
     for(const e of this.enemies){const dx=e.x-this.p.x,dy=e.y-this.p.y,d=Math.hypot(dx,dy);if(d<180&&!e.isBoss){e.x=clamp(this.p.x+(dx/(d||1)||1)*210,25,W-25);e.y=this.p.y+(dy/(d||1))*210;}e.dash=null;}
     this.rings.push({x:this.p.x,y:this.p.y,r:5,life:1.2,color:'#ff97bf'});this.burst(this.p.x,this.p.y,'#ffb7d1',45);
@@ -213,14 +215,16 @@ export class Game {
     if (this.combo % 10 === 0) { this.onEvent('combo', this.combo); this.shake = 4; }
   }
   nova() {
-    if (this.state !== 'playing' || this.novaCooldown > 0) return false;
+    if (this.state !== 'playing' || this.novaCooldown > 0 || this.reviveTimer>0) return false;
     this.novaCooldown = Math.max(4, 12 - this.novaPower); this.rings.push({ x: this.p.x, y: this.p.y, r: 12, life: .65, color: '#bdff83' }); this.shake = 9;
     for (const e of this.enemies) {
       const d = Math.hypot(e.x - this.p.x, e.y - this.p.y); if (d >= 245) continue;
       this.hit(e, 100 * this.novaPower, true);
       if (d > 0 && !e.isBoss) { e.x += (e.x - this.p.x) / d * 55; e.y += (e.y - this.p.y) / d * 55; }
     }
-    this.enemyShots = this.enemyShots.filter(b => Math.hypot(b.x - this.p.x, b.y - this.p.y) > 245); this.onEvent('nova'); return true;
+    this.enemyShots = this.enemyShots.filter(b => Math.hypot(b.x - this.p.x, b.y - this.p.y) > 245);
+    this.novaFx={x:this.p.x,y:this.p.y,age:0};this.impactStop=.06;this.shake=16;
+    this.burst(this.p.x,this.p.y,'#e6ffbd',45);this.onEvent('nova'); return true;
   }
   get availableUpgrades() {
     return upgrades.filter(u => !(u.id==='multi'&&this.multi>=7&&(this.levels.multi??0)>=1) && !(u.id==='orbit'&&this.orbits>=5&&(this.levels.orbit??0)>=3)).map(u=>{
@@ -234,7 +238,9 @@ export class Game {
     this.xp -= this.nextXp; this.level++; this.nextXp = Math.round(this.nextXp * 1.35 + 9);
     const pool = this.availableUpgrades;
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-    this.choices = pool.slice(0, 3); this.state = 'upgrade'; this.onEvent('level');
+    this.choices = pool.slice(0, 3); this.state = 'upgrade';this.upgradeIntro=.85;
+    this.burst(this.p.x,this.p.y,'#c5ff80',35);
+    this.rings.push({x:this.p.x,y:this.p.y,r:10,life:1,color:'#d5ff9e'});this.onEvent('level');
   }
   checkEvolutions() {
     for (const evolution of this.evolutions) {
@@ -243,7 +249,7 @@ export class Game {
     }
   }
   choose(id) {
-    if (this.state !== 'upgrade' || !this.choices.some(x => x.id === id)) return false;
+    if (this.state !== 'upgrade' || this.upgradeIntro>0 || !this.choices.some(x => x.id === id)) return false;
     if (id === 'power') this.damage *= 1.3;
     if (id === 'speed') this.interval = Math.max(.065, this.interval * .82);
     if (id === 'multi') this.multi=Math.min(7,this.multi+1);
@@ -281,6 +287,11 @@ export class Game {
     }
   }
   update(dt, input = { x: 0, y: 0 }) {
+    dt=clamp(dt,0,.05);
+    if(this.state==='upgrade'){this.upgradeIntro=Math.max(0,this.upgradeIntro-dt);this.updateEffects(dt);return;}
+    // Presentation freezes combat, so resurrection protection starts after the reveal.
+    if(['playing','loot'].includes(this.state)&&this.reviveTimer>0){this.reviveTimer=Math.max(0,this.reviveTimer-dt);this.updateEffects(dt);return;}
+    if(this.state==='playing'&&this.impactStop>0){this.impactStop=Math.max(0,this.impactStop-dt);this.updateEffects(dt);return;}
     if(this.state==='loot'){
       dt=clamp(dt,0,.05);this.lootTimer-=dt;this.collectDrops(dt);this.updateEffects(dt);
       if(this.lootTimer<=0){this.state='relic';this.onEvent('reward');}return;
@@ -346,9 +357,10 @@ export class Game {
     }
     this.bullets = this.bullets.filter(b => b.life > 0 && b.x > -40 && b.x < W + 40 && Math.abs(b.y - p.y) < 900);
     this.enemies = this.enemies.filter(e => e.hp > 0 && (e.isBoss || Math.abs(e.y - p.y) < 1000));
-    this.resolveDeath();if(this.state==='dead')return;this.collectDrops(dt);this.updateEffects(dt);this.checkLevel();
+    this.resolveDeath();if(this.state==='dead'||this.reviveTimer>0)return;this.collectDrops(dt);this.updateEffects(dt);this.checkLevel();
   }
   updateEffects(dt) {
+    if(this.novaFx){this.novaFx.age+=dt;if(this.novaFx.age>=.8)this.novaFx=null;}
     this.shake=Math.max(0,this.shake-dt*20);
     for (const a of this.particles) { a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt; a.vx *= .96; a.vy *= .96; } this.particles = this.particles.filter(a => a.life > 0).slice(-500);
     for (const t of this.texts) { t.y -= dt * 35; t.life -= dt; } this.texts = this.texts.filter(t => t.life > 0).slice(-80);

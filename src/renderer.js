@@ -116,6 +116,17 @@ export function drawGame(ctx, g, assets, clock) {
   for (const arc of g.arcs) { ctx.strokeStyle = '#a3faff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(arc.x, arc.y); ctx.lineTo((arc.x + arc.tx) / 2 + 8, (arc.y + arc.ty) / 2 - 8); ctx.lineTo(arc.tx, arc.ty); ctx.stroke(); }
   for (const p of g.particles) { ctx.globalAlpha = Math.min(1, p.life * 3); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); } ctx.globalAlpha = 1;
   for (const r of g.rings) { ctx.globalAlpha = Math.min(1, r.life); ctx.strokeStyle = r.color; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke(); } ctx.globalAlpha = 1;
+  if(g.novaFx){
+    const {x,y,age}=g.novaFx,t=age/.8,r=245*(1-Math.pow(1-t,3)),fade=1-t;
+    ctx.save();ctx.globalCompositeOperation='screen';
+    const glow=ctx.createRadialGradient(x,y,0,x,y,Math.max(1,r));
+    glow.addColorStop(0,`rgba(237,255,200,${Math.max(0,1-age*6)*.8})`);glow.addColorStop(.7,'#b8ff5810');glow.addColorStop(1,'#b8ff5800');
+    ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+    for(let i=0;i<3;i++){ctx.globalAlpha=fade*(1-i*.22);ctx.strokeStyle=i?'#bfff78':'#faffdf';ctx.lineWidth=(i?5:12)*fade+1;ctx.shadowBlur=20;ctx.shadowColor='#c5ff83';ctx.beginPath();ctx.arc(x,y,r*(1-i*.16),0,Math.PI*2);ctx.stroke();}
+    ctx.shadowBlur=0;ctx.globalAlpha=fade*.75;ctx.strokeStyle='#e6ff9c';ctx.lineWidth=2;
+    for(let i=0;i<24;i++){const a=i*Math.PI/12;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*r*.83,y+Math.sin(a)*r*.83);ctx.lineTo(x+Math.cos(a)*(r+25*fade),y+Math.sin(a)*(r+25*fade));ctx.stroke();}
+    ctx.restore();
+  }
   ctx.textAlign = 'center';
   for (const t of g.texts) { ctx.globalAlpha = Math.min(1, t.life * 3); ctx.font = `800 ${t.big ? 19 : 13}px sans-serif`; ctx.strokeStyle = '#13221a'; ctx.lineWidth = 3; ctx.strokeText(t.text, t.x, t.y); ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y); } ctx.globalAlpha = 1;
   ctx.restore();

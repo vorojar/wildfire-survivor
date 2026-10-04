@@ -51,3 +51,14 @@ test('sample assets contain short non-clipped PCM transients with no long start 
     assert.ok(max>.5&&max<.99);assert.ok(energy>1);assert.ok(onset>=0&&onset<.03);assert.ok((data.length-44)/2/44100<1);
   }
 });
+
+
+test('level cue survives the upgrade introduction and revival lowers music until combat resumes',()=>{
+  const s=readySound(),g={state:'playing',musicMode:'combat',upgradeIntro:0,reviveTimer:0};s.update(g);
+  s.play('level');const cue=[...s.voices];g.state='upgrade';g.upgradeIntro=.85;s.update(g);
+  assert.ok(cue.every(voice=>s.voices.has(voice)));assert.ok(s.musicSource);
+  g.upgradeIntro=0;s.update(g);assert.equal(s.voices.size,0);assert.equal(s.musicSource,null);
+  g.state='playing';g.reviveTimer=1.4;s.play('revive');s.update(g);const subdued=s.musicBus.gain.value;
+  assert.ok(s.voices.size>0);g.reviveTimer=0;s.update(g);assert.ok(s.musicBus.gain.value>subdued);
+  s.play('nova');assert.ok(s.voices.size<=48);s.enabled=false;s.update(g);assert.equal(s.voices.size,0);assert.equal(s.musicSource,null);
+});
