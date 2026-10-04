@@ -55,3 +55,5 @@
 @keyframes armory-pulse{50%{box-shadow:0 0 0 5px #c2f2760a}}
 @media(max-width:600px){.armory-badge{top:9px;right:-5px;width:12px;height:12px;font-size:10px}.level-celebration>b{font-size:48px}.revive-feedback strong{font-size:30px}}
 @media(prefers-reduced-motion:reduce){.level-celebration,.upgrade-reveal,.upgrade-reveal .upgrade-modal,.upgrade-reveal .upgrade-options button,.revive-feedback>div,.armory-badge{animation:none}.revive-feedback{transition:none}}
+
+.header nav .armory-nav:focus-visible{outline:none;text-decoration:underline;text-underline-offset:6px}
