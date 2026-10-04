@@ -3,11 +3,14 @@ import { lootTypes } from './loot.js';
 
 function ready(img) { return img?.complete && img.naturalWidth > 0; }
 const terrainCaches = new WeakMap();
+export function invalidateTerrainCache(assets) { terrainCaches.delete(assets); }
 function terrainTile(chunk, assets) {
   if(!['arena','ruins','infected'].every(key=>ready(assets[key])))return null;
   let cache=terrainCaches.get(assets);if(!cache){cache=new Map();terrainCaches.set(assets,cache);}
   if(cache.has(chunk.id))return cache.get(chunk.id);
   const tile=document.createElement('canvas');tile.width=W;tile.height=H;const context=tile.getContext('2d');
+  if(!context||context.isContextLost?.())return null;
+  tile.addEventListener('contextlost',event=>{event.preventDefault();if(cache.get(chunk.id)===tile)cache.delete(chunk.id);},{once:true});
   const mirrored=Math.abs(chunk.id)%2===1;
   for(let y=0;y<H;y+=4){
     const height=Math.min(4,H-y), blend=biomeBlendAt(chunk.top+y+height/2),sourceY=mirrored?H-y-height:y;

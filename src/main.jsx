@@ -3,12 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { Crosshair, Zap, GitFork, MoveUpRight, Heart, Magnet, Orbit, Radio, Flame, Swords, Package, VolumeX, Volume2, Play, Pause, BookOpen, Mouse, Clock3, RefreshCw, ChevronsUp, ChevronRight, Flag, RotateCcw, X, ArrowRight, Settings, Shield, Footprints, ChartNoAxesColumnIncreasing, Skull, Target } from 'lucide-react';
 import { Game, upgrades, Sound, drawGame, timeText, W, H } from './game';
 import { ExpeditionHUD, EvolutionPanel, AdvanceButton, AudioPanel, RelicModal, JourneyStats, AtlasSprite, EvolutionModal, UpgradeEvolutionHint } from './Expedition';
-import { Music2 } from 'lucide-react';
+import { Music2, Share2 } from 'lucide-react';
 import { restoreRun, writeProgress, SaveConflictError } from './run-save.js';
 import { equipmentPrice, canUpgradeEquipment, affordableEquipmentCount } from './armory.js';
 import { purchasePrice, canPurchase, purchaseCombatSupply } from './combat-purchases.js';
 import { START_TICKETS, BOMB_COOLDOWN, BOOST_LIMIT, LIFE_LIMIT, supplyTickets } from './economy.js';
 import { BattleReport } from './BattleReport.jsx';
+import { invalidateTerrainCache } from './renderer.js';
 import './style.css';
 import './expedition.css';
 
@@ -21,6 +22,7 @@ function Sprite({index=0,className=''}){return <span className={`sprite sprite-$
 function App(){
   const [save,setSave]=useState(readSave),saveRef=useRef(save),[game,setGame]=useState(null),gameRef=useRef(null),[,tick]=useState(0),[tab,setTab]=useState('battle'),[muted,setMuted]=useState(false),[toast,setToast]=useState(''),[storageError,setStorageError]=useState(false),[audioOpen,setAudioOpen]=useState(false),[evolutionOpen,setEvolutionOpen]=useState(false);
   const evolutionResume=useRef(false),saveDirty=useRef(false),lastCheckpoint=useRef(0);
+  const rendererResume=useRef(null);
   const [resumed,setResumed]=useState(false),[externalSave,setExternalSave]=useState(false);
   const saveConflict=useRef(false);
   const [confirmAbandon,setConfirmAbandon]=useState(false),[reportOpen,setReportOpen]=useState(false);
@@ -31,6 +33,13 @@ function App(){
   function blockStaleSave(){saveConflict.current=true;saveDirty.current=false;if(gameRef.current?.state==='playing')gameRef.current.pause();setExternalSave(true);}
   function checkpoint(){if(saveConflict.current)return false;if(!saveDirty.current&&gameRef.current?.state==='ready')return true;try{const saved=writeProgress(localStorage,saveRef.current,gameRef.current);saveRef.current=saved;setSave(saved);saveDirty.current=false;lastCheckpoint.current=performance.now();setStorageError(false);return true;}catch(error){if(error instanceof SaveConflictError)blockStaleSave();else setStorageError(true);return false;}}
   function notify(text){setToast(text);clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(''),2400);}
+  function fitCanvas(reset=false){
+    const surface=canvas.current,g=gameRef.current;if(!surface||!g)return;
+    const {width,height}=surface.parentElement.getBoundingClientRect();if(width<=0||height<=0)return;
+    const logicalHeight=Math.round(W*height/width);
+    if(reset||surface.height!==logicalHeight){surface.width=W;surface.height=logicalHeight;}
+    g.resizeViewport(logicalHeight);g.world.update(g.p.y);
+  }
   function makeGame(hero=saveRef.current.hero){const g=new Game({hero,gear:saveRef.current.gear,onEvent:(type,value)=>{
     sound.current?.play(type);
     if(type==='coin')persist({...saveRef.current,bank:saveRef.current.bank+value},false);
@@ -54,31 +63,39 @@ function App(){
   useEffect(()=>{
     sound.current=new Sound({assetBase:`${import.meta.env.BASE_URL}audio/`});const initial=makeGame();
     if(saveRef.current.run){try{restoreRun(initial,saveRef.current.run);setResumed(true);}catch(error){notify(error.message);makeGame();}}
-    const assets={};for(const name of ['sprites','arena','ruins','infected','expedition','monsters','loot']){assets[name]=new Image();assets[name].src=`${import.meta.env.BASE_URL}assets/${name}.png`;}
+    let disposed=false;
+    const assets={},loadAsset=name=>{const img=new Image();img.onload=()=>{if(!disposed)invalidateTerrainCache(assets);};img.onerror=()=>{if(!disposed)console.warn('战场贴图加载失败',name);};img.src=`${import.meta.env.BASE_URL}assets/${name}.png`;return img;};
+    for(const name of ['sprites','arena','ruins','infected','expedition','monsters','loot'])assets[name]=loadAsset(name);
     sound.current.setVolumes(saveRef.current.audio.music,saveRef.current.audio.fx);
     let raf,last=performance.now(),ui=0;
-    const loop=now=>{const dt=(now-last)/1000;last=now;const g=gameRef.current;if(g){const k=keys.current;g.update(dt,{x:(k.has('d')||k.has('arrowright')?1:0)-(k.has('a')||k.has('arrowleft')?1:0)+stick.current.x,y:(k.has('s')||k.has('arrowdown')?1:0)-(k.has('w')||k.has('arrowup')?1:0)+stick.current.y});sound.current.update(g);if(saveDirty.current || (['playing','loot'].includes(g.state)&&now-lastCheckpoint.current>2000))checkpoint();if(canvas.current)drawGame(canvas.current.getContext('2d'),g,assets,now/1000);if(now-ui>70){tick(n=>n+1);ui=now;}}raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);
+    const loop=now=>{const dt=(now-last)/1000;last=now;const g=gameRef.current;if(g){const k=keys.current;g.update(dt,{x:(k.has('d')||k.has('arrowright')?1:0)-(k.has('a')||k.has('arrowleft')?1:0)+stick.current.x,y:(k.has('s')||k.has('arrowdown')?1:0)-(k.has('w')||k.has('arrowup')?1:0)+stick.current.y});sound.current.update(g);if(saveDirty.current || (['playing','loot'].includes(g.state)&&now-lastCheckpoint.current>2000))checkpoint();const ctx=canvas.current?.getContext('2d');if(ctx&&!ctx.isContextLost?.())drawGame(ctx,g,assets,now/1000);if(now-ui>70){tick(n=>n+1);ui=now;}}raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);
     const down=e=>{if(e.target instanceof HTMLElement&&e.target.tagName==='INPUT')return;if(document.querySelector('.armory-overlay, .evolution-overlay, .save-conflict, .abandon-overlay, .report-overlay'))return;if(e.target instanceof HTMLElement&&['BUTTON','INPUT'].includes(e.target.tagName)&&e.code==='Space')return;const key=e.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' '].includes(key))e.preventDefault();keys.current.add(key);if(e.repeat)return;if(e.code==='Space')gameRef.current?.nova();if(key==='escape'||key==='p'){sound.current?.unlock();gameRef.current?.pause();saveDirty.current=true;tick(n=>n+1);}};
     const up=e=>keys.current.delete(e.key.toLowerCase());
     const blur=()=>{keys.current.clear();stick.current={x:0,y:0};pointer.current=null;setJoystick(null);if(gameRef.current?.state==='playing'){gameRef.current.pause();saveDirty.current=true;sound.current?.update(gameRef.current);tick(n=>n+1);}};
-    const visibility=()=>{if(document.hidden){blur();checkpoint();}};
+    const recover=()=>{
+      if(disposed||document.hidden)return;
+      last=performance.now();invalidateTerrainCache(assets);fitCanvas(true);
+      // Mobile browsers may discard decoded images and offscreen canvas contents while suspended.
+      for(const [name,img] of Object.entries(assets))img.decode().then(()=>{if(!disposed)invalidateTerrainCache(assets);}).catch(()=>{if(!disposed)assets[name]=loadAsset(name);});
+      cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);tick(n=>n+1);
+    };
+    rendererResume.current=recover;
+    const suspend=()=>{blur();sound.current?.stopMusic();sound.current?.stopFx();checkpoint();cancelAnimationFrame(raf);};
+    const visibility=()=>{if(document.hidden)suspend();else recover();};
     const remoteSave=e=>{if(e.key==='wildfire-save')blockStaleSave();};window.addEventListener('storage',remoteSave);
-    const pagehide=()=>checkpoint();window.addEventListener('pagehide',pagehide);window.addEventListener('beforeunload',pagehide);
-    window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',blur);document.addEventListener('visibilitychange',visibility);
-    return()=>{cancelAnimationFrame(raf);clearTimeout(toastTimer.current);window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('storage',remoteSave);window.removeEventListener('pagehide',pagehide);window.removeEventListener('beforeunload',pagehide);sound.current?.dispose();};
+    const pagehide=suspend;window.addEventListener('pagehide',pagehide);window.addEventListener('beforeunload',pagehide);
+    window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',blur);document.addEventListener('visibilitychange',visibility);window.addEventListener('pageshow',recover);window.addEventListener('focus',recover);
+    return()=>{disposed=true;rendererResume.current=null;cancelAnimationFrame(raf);window.removeEventListener('pageshow',recover);window.removeEventListener('focus',recover);clearTimeout(toastTimer.current);window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('storage',remoteSave);window.removeEventListener('pagehide',pagehide);window.removeEventListener('beforeunload',pagehide);sound.current?.dispose();};
   },[]);
   useEffect(()=>{
     if(!game || !canvas.current)return;
-    const surface=canvas.current, arena=surface.parentElement;
-    const resize=()=>{
-      const {width,height}=arena.getBoundingClientRect();
-      if(!width || !height)return;
-      const logicalHeight=Math.round(W*height/width);
-      if(surface.height!==logicalHeight)surface.height=logicalHeight;
-      game.resizeViewport(logicalHeight);
-    };
+    const surface=canvas.current,arena=surface.parentElement;
+    const resize=()=>fitCanvas();
+    const lost=event=>{event.preventDefault();keys.current.clear();pointerUp();if(gameRef.current?.state==='playing')gameRef.current.pause();saveDirty.current=true;tick(n=>n+1);};
+    const restored=()=>rendererResume.current?.();
+    surface.addEventListener('contextlost',lost);surface.addEventListener('contextrestored',restored);
     const observer=new ResizeObserver(resize);observer.observe(arena);resize();
-    return()=>observer.disconnect();
+    return()=>{observer.disconnect();surface.removeEventListener('contextlost',lost);surface.removeEventListener('contextrestored',restored);};
   },[game]);
   function openEvolution(){evolutionResume.current=game.state==='playing';if(evolutionResume.current)game.pause();keys.current.clear();pointerUp();setEvolutionOpen(true);}
   function closeEvolution(){setEvolutionOpen(false);if(evolutionResume.current&&game.state==='paused'&&!document.hidden)game.pause();evolutionResume.current=false;}
@@ -128,7 +145,7 @@ function App(){
           {evolutionOpen&&<EvolutionModal game={game} onClose={closeEvolution}/> }
           {game.state==='loot'&&<div className="loot-banner" role="status"><Icon name="Flag" size={24}/><b>{game.lastBoss.name} · 击破</b><span>金币雨 +{game.lastBoss.gold} · 战利品回收中{game.lastBoss.life?' · 复苏之心！':''}{game.lastBoss.tickets?' · 补给券 +1':''}</span></div>}
           {game.state==='relic'&&<RelicModal game={game} refresh={()=>{sound.current.unlock();setResumed(false);tick(n=>n+1);}}/> }
-          {game.state==='dead'&&<div className="overlay" onPointerDown={e=>e.stopPropagation()}><div className="modal end-modal"><Icon name="Flag" size={35}/><h2>战至最后一刻</h2><p>每一次归来，都比上次更强。</p><JourneyStats game={game}/><div className="end-stats"><div><b>{timeText(game.time)}</b><span>生存时间</span></div><div><b>{game.kills}</b><span>击杀数量</span></div><div><b>{game.coins}</b><span>本局获取金币</span></div></div><div className="life-offer"><button className="primary" disabled={!canPurchase(game,save.tickets,'life')} onClick={()=>buySupply('life')}><Icon name="Heart" size={19}/> {game.livesBought>=LIFE_LIMIT?'本局续命已用尽':`再来一条命 · ${purchasePrice(game,'life')} 张券`}</button><small>原地满血 + 4 秒无敌 · 剩余 {Math.max(0,LIFE_LIMIT-game.livesBought)} 次<br/>补给券 {save.tickets} 张 · 每击败 Boss 获得 1 张</small></div><button className="secondary" onClick={()=>setReportOpen(true)}>这一波，晒出战绩 ↗</button><button className="secondary replay-button" onClick={start}>重新开局 <Icon name="RotateCcw" size={18}/></button><button className="secondary" onClick={()=>{makeGame();setTab('armory');}}>军械强化</button></div></div>}
+          {game.state==='dead'&&<div className="overlay" onPointerDown={e=>e.stopPropagation()}><div className="modal end-modal"><Icon name="Flag" size={35}/><h2>战至最后一刻</h2><p>每一次归来，都比上次更强。</p><JourneyStats game={game}/><div className="end-stats"><div><b>{timeText(game.time)}</b><span>生存时间</span></div><div><b>{game.kills}</b><span>击杀数量</span></div><div><b>{game.coins}</b><span>本局获取金币</span></div></div><div className="life-offer"><button className="primary" disabled={!canPurchase(game,save.tickets,'life')} onClick={()=>buySupply('life')}><Icon name="Heart" size={19}/> {game.livesBought>=LIFE_LIMIT?'本局续命已用尽':`再来一条命 · ${purchasePrice(game,'life')} 张券`}</button><small>原地满血 + 4 秒无敌 · 剩余 {Math.max(0,LIFE_LIMIT-game.livesBought)} 次<br/>补给券 {save.tickets} 张 · 每击败 Boss 获得 1 张</small></div><button className="primary end-share" onClick={()=>setReportOpen(true)}><Share2 size={19}/> 这一波，晒出战绩</button><button className="secondary replay-button" onClick={start}>重新开局 <Icon name="RotateCcw" size={18}/></button></div></div>}
           {reportOpen&&<BattleReport game={game} onClose={()=>setReportOpen(false)}/>}
           {confirmAbandon&&<div className="overlay abandon-overlay" role="dialog" aria-label="确认放弃本局" onPointerDown={e=>e.stopPropagation()}><div className="modal"><h2>结束这次远征？</h2><p>本局等级、武器和地图进度将重置。<br/>已获得的金币与永久装备会保留。</p><button className="primary" onClick={abandonRun}>确认结束 · 返回准备</button><button className="secondary" onClick={()=>setConfirmAbandon(false)}>取消，保留远征</button></div></div>}
           {externalSave&&<div className="overlay save-conflict" role="dialog" aria-label="存档已在其他页面更新" onPointerDown={e=>e.stopPropagation()}><div className="modal"><h2>远征在另一页继续</h2><p>另一个页面已保存新的进度。请载入最新存档，避免覆盖。</p><button className="primary" onClick={()=>location.reload()}>载入最新进度</button></div></div>}
