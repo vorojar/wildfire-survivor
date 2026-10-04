@@ -2,6 +2,7 @@ import { W, H, ORIGIN_Y, World, distanceAt, biomeAt } from './world.js';
 import { bossTypes, bossRewards, updateBoss, updateHazards } from './bosses.js';
 import { enemyTypes, enemyForZone, updateEnemy } from './enemies.js';
 import { lootTypes, rollLoot } from './loot.js';
+import { BOMB_COOLDOWN, BOOST_LIMIT } from './economy.js';
 export { enemyTypes } from './enemies.js';
 export { W, H } from './world.js';
 export { Sound } from './audio.js';
@@ -50,8 +51,8 @@ export class Game {
     for (let i = 0; i < 9; i++) this.drop(rand(90, 390), rand(190, 620), 1);
   }
   get difficulty() { return 1 + this.distance / 430 + this.time / 240; }
-  get damageBonus() { return this.boostsBought * 20; }
-  get damageMultiplier() { return 1 + this.boostsBought * .2; }
+  get damageBonus() { return Math.min(this.boostsBought,BOOST_LIMIT) * 20; }
+  get damageMultiplier() { return 1 + this.damageBonus / 100; }
   // Sustained output only: temporary haste, bombs and nova never inflate enemy health.
   get sustainedDps() {
     const primary = this.damage / (this.interval * (this.evolved.has('gatling') ? .52 : 1)) * (1 + (this.multi-1)*.55);
@@ -136,15 +137,16 @@ export class Game {
     this.onEvent('boss', boss.name); return boss;
   }
   finishBoss(boss) {
+    if(!boss||this.boss?.id!==boss.id)return;
     this.bossKills++; this.boss = null; this.bossGate = null; this.autoAdvance = false;
     this.enemies=this.enemies.filter(e=>e.hp>0 && e!==boss);
     this.hazards = this.hazards.filter(h => h.owner !== boss.id); this.enemyShots = this.enemyShots.filter(b => b.owner !== boss.id);
     this.nextBossDistance = Math.max(this.nextBossDistance + 380, this.distance + 180); this.nextBossTime = this.time + 75;
-    this.lastBoss = { name: boss.name, art: boss.art, color: boss.color, gold: 0, life: false };
+    this.lastBoss = { name: boss.name, art: boss.art, color: boss.color, gold: 0, life: false, tickets: 1 };
     const drops = [];
     for(let i=0;i<36;i++) drops.push(['coin', 3+Math.floor(this.distance/400)]);
     for(let i=0;i<12;i++) drops.push(['xp', 2]);
-    drops.push(['chest',1],['heal',35],['magnet',1],['haste',1],['shield',1]);
+    drops.push(['chest',1],['heal',35],['magnet',1],['haste',1],['shield',1],['ticket',1]);
     this.lifeDryStreak++;
     if(this.lives<5 && (Math.random()<.4 || this.lifeDryStreak>=3)) { drops.push(['life',1]); this.lastBoss.life=true; this.lifeDryStreak=0; }
     drops.forEach(([type,value],i) => {
@@ -281,7 +283,7 @@ export class Game {
     }
     this.enemyShots=[];this.hazards=[];this.p.invuln=Math.max(this.p.invuln,.8);
     this.buffs.magnet=Math.max(this.buffs.magnet,2);this.novaFx={x:this.p.x,y:this.p.y,age:0,radius,bomb:true};
-    this.impactStop=.09;this.shake=23;this.bombCooldown=.45;
+    this.impactStop=.09;this.shake=23;this.bombCooldown=BOMB_COOLDOWN;
     this.burst(this.p.x,this.p.y,'#ffcb73',80);this.onEvent('nova');
     this.onEvent('purchase',`轰！击破 ${this.kills-before} 只怪物 · 战利品回收中`);
   }
@@ -385,7 +387,7 @@ export class Game {
     this.resolveDeath();if(this.state==='dead'||this.reviveTimer>0)return;this.collectDrops(dt);this.updateEffects(dt);this.checkLevel();
   }
   updateEffects(dt) {
-    this.bombCooldown=Math.max(0,this.bombCooldown-dt);
+    if(this.state==='playing'||this.state==='loot')this.bombCooldown=Math.max(0,this.bombCooldown-dt);
     if(this.novaFx){this.novaFx.age+=dt;if(this.novaFx.age>=.8)this.novaFx=null;}
     this.shake=Math.max(0,this.shake-dt*20);
     for (const a of this.particles) { a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt; a.vx *= .96; a.vy *= .96; } this.particles = this.particles.filter(a => a.life > 0).slice(-500);
@@ -410,6 +412,7 @@ export class Game {
     for(const d of picked){
       if(d.type==='coin'){this.coins+=d.value;collected+=d.value;continue;}
       if(d.type==='xp'){this.xp+=d.value;continue;}
+      if(d.type==='ticket')this.onEvent('ticket',d.value);
       if(d.type==='heal')p.hp=Math.min(p.maxHp,p.hp+d.value);
       if(d.type==='life'){this.lives=Math.min(5,this.lives+1);this.onEvent('life',this.lives);}
       if(d.type==='magnet')this.buffs.magnet=10;
@@ -423,7 +426,7 @@ export class Game {
       if(d.type==='chest'){const value=30+this.zone*12;this.coins+=value;collected+=value;p.hp=Math.min(p.maxHp,p.hp+20);this.drop(p.x+40,p.y,1,['magnet','haste','shield'][Math.floor(Math.random()*3)]);}
       const item=lootTypes[d.type];this.texts.push({x:p.x,y:p.y-40,text:item.name,color:item.color,life:1.1});this.onEvent('pickup',item.name);
     }
-    if (this.drops.length > 500) { const excess = this.drops.splice(0, 100);for(const type of ['coin','xp']){const value=excess.filter(d=>d.type===type).reduce((n,d)=>n+d.value,0);if(value)this.drop(p.x,p.y-50,value,type);} }
+    if (this.drops.length > 500) { const excess=[];this.drops=this.drops.filter(d=>{if(excess.length<100&&(d.type==='coin'||d.type==='xp')){excess.push(d);return false;}return true;});for(const type of ['coin','xp']){const value=excess.filter(d=>d.type===type).reduce((n,d)=>n+d.value,0);if(value)this.drop(p.x,p.y-50,value,type);} }
     if (collected) this.onEvent('coin', collected);
   }
 }

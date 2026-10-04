@@ -1,4 +1,5 @@
 import { biomeAt } from './world.js';
+import { supplyTickets } from './economy.js';
 
 const omitted = new Set(['onEvent','world','biome','boss','evolved','bullets','particles','texts','rings','arcs','upgradeIntro','reviveTimer','novaFx','impactStop']);
 const states = ['playing','paused','upgrade','loot','relic','dead'];
@@ -41,7 +42,7 @@ export function restoreRun(game, snapshot) {
   for(const key of ['level','nextXp','damage','interval','threatGrowth'])if(!(d[key]>0))invalid();
   if(!['x','y','hp','maxHp','speed','invuln','face'].every(k=>Number.isFinite(d.p[k])))invalid();
   if(!d.enemies.every(e=>['x','y','hp','maxHp','id','speed','size'].every(k=>Number.isFinite(e[k]))))invalid();
-  if(!d.drops.every(drop=>['coin','xp','heal','magnet','bomb','haste','shield','chest','life'].includes(drop.type)&&Number.isFinite(drop.x)&&Number.isFinite(drop.y)))invalid();
+  if(!d.drops.every(drop=>['coin','xp','heal','magnet','bomb','haste','shield','chest','life','ticket'].includes(drop.type)&&Number.isFinite(drop.x)&&Number.isFinite(drop.y)&&(drop.type!=='ticket'||drop.value===1)))invalid();
   if(!Array.isArray(snapshot.evolved)||!snapshot.evolved.every(id=>['gatling','blast','storm'].includes(id))||!Array.isArray(snapshot.bullets)||!snapshot.bullets.every(b=>Array.isArray(b.hits)))invalid();
   if(!snapshot.world||!Array.isArray(snapshot.world.used)||!snapshot.world.used.every(Number.isInteger)||!Number.isFinite(snapshot.world.furthest))invalid();
   if(snapshot.bossId!==null&&!d.enemies.some(e=>e.id===snapshot.bossId&&e.isBoss&&e.hp>0))invalid();
@@ -64,7 +65,7 @@ export function restoreRun(game, snapshot) {
 export function writeProgress(storage, profile, game) {
   const latest=JSON.parse(storage.getItem('wildfire-save')||'null');
   if((latest?.revision??0)!==(profile.revision??0))throw new SaveConflictError('另一个页面已更新进度');
-  const saved={...profile,run:game?.state==='ready'?(profile.run??null):captureRun(game),savedAt:Date.now(),revision:(profile.revision??0)+1};
+  const saved={...profile,tickets:supplyTickets(profile),run:game?.state==='ready'?(profile.run??null):captureRun(game),savedAt:Date.now(),revision:(profile.revision??0)+1};
   const serialized=JSON.stringify(saved);
   storage.setItem('wildfire-save',serialized);
   // Keep in-memory continuation identical to a reload, without live game references.
