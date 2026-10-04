@@ -34,6 +34,7 @@ export class Game {
     this.lives = 3; this.revives = 0; this.lootTimer = 0; this.lastBoss = null; this.lifeDryStreak = 0;
     this.regionEvent=null;this.nextRegionEvent=110;
     this.upgradeIntro=0;this.reviveTimer=0;this.novaFx=null;this.impactStop=0;
+    this.bombsBought=0;this.boostsBought=0;this.livesBought=0;this.coinsSpent=0;this.upgradeSelection='';this.bombCooldown=0;this.paidRevival=false;
     this.p = { x: W / 2, y: ORIGIN_Y, hp: 120 + gear[1] * 20, maxHp: 120 + gear[1] * 20, speed: 150 + gear[2] * 10, invuln: 0, face: 1 };
     this.damage = (hero ? 22 : 18) + gear[0] * 4; this.interval = hero ? .27 : .21;
     this.multi = 1; this.pierce = 0; this.magnet = 130 + gear[3] * 15; this.orbits = 0; this.novaPower = 1; this.crit = .16;
@@ -49,6 +50,8 @@ export class Game {
     for (let i = 0; i < 9; i++) this.drop(rand(90, 390), rand(190, 620), 1);
   }
   get difficulty() { return 1 + this.distance / 430 + this.time / 240; }
+  get damageBonus() { return this.boostsBought * 20; }
+  get damageMultiplier() { return 1 + this.boostsBought * .2; }
   // Sustained output only: temporary haste, bombs and nova never inflate enemy health.
   get sustainedDps() {
     const primary = this.damage / (this.interval * (this.evolved.has('gatling') ? .52 : 1)) * (1 + (this.multi-1)*.55);
@@ -172,7 +175,10 @@ export class Game {
     if(this.p.hp>0 || this.state==='dead')return;
     this.lives--;this.autoAdvance=false;
     if(this.lives===0){this.state='dead';this.onEvent('dead');return;}
-    this.revives++;this.p.hp=this.p.maxHp;this.p.invuln=4;
+    this.reviveInPlace();
+  }
+  reviveInPlace(paid=false) {
+    this.paidRevival=paid;this.revives++;this.p.hp=this.p.maxHp;this.p.invuln=4;
     this.reviveTimer=1.4;this.shake=15;
     this.enemyShots=[];this.hazards=[];
     for(const e of this.enemies){const dx=e.x-this.p.x,dy=e.y-this.p.y,d=Math.hypot(dx,dy);if(d<180&&!e.isBoss){e.x=clamp(this.p.x+(dx/(d||1)||1)*210,25,W-25);e.y=this.p.y+(dy/(d||1))*210;}e.dash=null;}
@@ -189,17 +195,17 @@ export class Game {
     this.p.hp = Math.max(0, this.p.hp - damage * (1 - Math.min(.5, this.gear[1] * .04)));
     this.p.invuln = .65; this.shake = 7; this.burst(this.p.x, this.p.y, '#fa6262'); this.onEvent('hurt'); return true;
   }
-  hit(e, damage, crit = false) {
+  hit(e, damage, crit = false, bossCap = .045) {
     if (e.hp <= 0) return;
     if(e.isBoss && e.shieldTime>0)return;
-    damage *= 1-(e.isBoss?.2:(e.armor??0));
-    if(e.isBoss)damage=Math.min(damage,e.maxHp*.045);
+    damage *= this.damageMultiplier * (1-(e.isBoss?.2:(e.armor??0)));
+    if(e.isBoss)damage=Math.min(damage,e.maxHp*bossCap);
     e.hp -= damage; e.flash = .1; this.onEvent('hit');
     if(e.isBoss && e.phaseLevel<2){
       const threshold=e.maxHp*(e.phaseLevel===0?.65:.3);
       if(e.hp<=threshold){e.hp=threshold;e.phaseLevel++;e.shieldTime=3;e.attackClock=.1;this.onEvent('bossPhase',`${e.name} · 护盾重组，准备反击`);}
     }
-    this.texts.push({ x: e.x + rand(-8, 8), y: e.y - 15, text: Math.round(damage), color: crit ? '#ffe67a' : '#edf8d9', life: .5, big: crit });
+    this.texts.push({ x: e.x + rand(-8, 8), y: e.y - 15, text: Math.round(damage), color: crit ? '#ffe67a' : this.boostsBought ? '#ffc789' : '#edf8d9', life: .5, big: crit });
     this.burst(e.x, e.y, e.color, 3);
     if (e.hp > 0) return;
     if(this.regionEvent && e.eventId===this.regionEvent.id)this.regionEvent.kills++;
@@ -238,7 +244,7 @@ export class Game {
     this.xp -= this.nextXp; this.level++; this.nextXp = Math.round(this.nextXp * 1.35 + 9);
     const pool = this.availableUpgrades;
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-    this.choices = pool.slice(0, 3); this.state = 'upgrade';this.upgradeIntro=.85;
+    this.choices = pool.slice(0, 3); this.state = 'upgrade';this.upgradeSelection='';this.upgradeIntro=.85;
     this.burst(this.p.x,this.p.y,'#c5ff80',35);
     this.rings.push({x:this.p.x,y:this.p.y,r:10,life:1,color:'#d5ff9e'});this.onEvent('level');
   }
@@ -248,7 +254,7 @@ export class Game {
       this.evolved.add(evolution.id); this.rings.push({ x: this.p.x, y: this.p.y, r: 10, life: 1, color: '#f7d588' }); this.onEvent('evolution', evolution.name);
     }
   }
-  choose(id) {
+  choose(id, { hold = false } = {}) {
     if (this.state !== 'upgrade' || this.upgradeIntro>0 || !this.choices.some(x => x.id === id)) return false;
     if (id === 'power') this.damage *= 1.3;
     if (id === 'speed') this.interval = Math.max(.065, this.interval * .82);
@@ -258,7 +264,26 @@ export class Game {
     if (id === 'magnet') { this.magnet += 55; this.p.speed = Math.min(320, this.p.speed * 1.08); }
     if (id === 'orbit') this.orbits=Math.min(5,this.orbits+1);
     if (id === 'nova') this.novaPower += .5;
-    this.levels[id] = (this.levels[id] ?? 0) + 1; this.state = 'playing'; this.choices = []; this.onEvent('choose'); this.checkEvolutions(); return true;
+    this.levels[id] = (this.levels[id] ?? 0) + 1; this.upgradeSelection=hold?id:'';this.state = hold?'upgrade':'playing'; this.choices = []; this.onEvent('choose'); this.checkEvolutions(); return true;
+  }
+  finishUpgrade() {
+    if(this.state!=='upgrade'||!this.upgradeSelection)return false;
+    this.upgradeSelection='';this.state='playing';this.onEvent('choose');return true;
+  }
+  detonateBomb() {
+    const radius=Math.max(420,this.viewHeight*.7),before=this.kills;
+    // Two passes include children spawned by splitting enemies. Boss phases remain intact.
+    for(let pass=0;pass<2;pass++)for(const e of [...this.enemies]){
+      const dx=e.x-this.p.x,dy=e.y-this.p.y,d=Math.hypot(dx,dy);
+      if(e.hp<=0||d>radius||(pass===1&&e.isBoss))continue;
+      this.hit(e,e.isBoss?e.maxHp*.15/.8/this.damageMultiplier:e.hp/(1-(e.armor??0))+1,true,.15);
+      if(e.isBoss){e.dash=null;e.attackClock=Math.max(e.attackClock,1.2);e.x=clamp(e.x+dx/(d||1)*45,35,W-35);e.y+=dy/(d||1)*45;}
+    }
+    this.enemyShots=[];this.hazards=[];this.p.invuln=Math.max(this.p.invuln,.8);
+    this.buffs.magnet=Math.max(this.buffs.magnet,2);this.novaFx={x:this.p.x,y:this.p.y,age:0,radius,bomb:true};
+    this.impactStop=.09;this.shake=23;this.bombCooldown=.45;
+    this.burst(this.p.x,this.p.y,'#ffcb73',80);this.onEvent('nova');
+    this.onEvent('purchase',`轰！击破 ${this.kills-before} 只怪物 · 战利品回收中`);
   }
   fire(angle, { shotgun = false, offset = 0 } = {}) {
     const crit = Math.random() < this.crit, blast = shotgun && this.evolved.has('blast'), a = angle + offset, speed = shotgun ? 510 : 680;
@@ -321,7 +346,7 @@ export class Game {
       if (this.shootClock <= 0) {
         this.shootClock = this.interval * (this.evolved.has('gatling') ? .52 : 1) * (this.buffs.haste>0?.65:1);
         for (let i = 0; i < this.multi; i++) this.fire(angle, { offset: (i - (this.multi - 1) / 2) * .14 });
-        this.burst(p.x + Math.cos(angle) * 27, p.y + Math.sin(angle) * 27, '#ffe29a', 2); this.onEvent(this.evolved.has('gatling') ? 'gatling' : 'shoot');
+        this.burst(p.x + Math.cos(angle) * 27, p.y + Math.sin(angle) * 27, this.boostsBought?'#ffb263':'#ffe29a', this.boostsBought?5:2); this.onEvent(this.evolved.has('gatling') ? 'gatling' : 'shoot');
       }
       if ((this.levels.shotgun ?? 0) > 0 && this.shotgunClock <= 0) {
         this.shotgunClock = this.evolved.has('blast') ? .85 : 1.35;
@@ -360,6 +385,7 @@ export class Game {
     this.resolveDeath();if(this.state==='dead'||this.reviveTimer>0)return;this.collectDrops(dt);this.updateEffects(dt);this.checkLevel();
   }
   updateEffects(dt) {
+    this.bombCooldown=Math.max(0,this.bombCooldown-dt);
     if(this.novaFx){this.novaFx.age+=dt;if(this.novaFx.age>=.8)this.novaFx=null;}
     this.shake=Math.max(0,this.shake-dt*20);
     for (const a of this.particles) { a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt; a.vx *= .96; a.vy *= .96; } this.particles = this.particles.filter(a => a.life > 0).slice(-500);

@@ -1,7 +1,7 @@
 import { biomeAt } from './world.js';
 
 const omitted = new Set(['onEvent','world','biome','boss','evolved','bullets','particles','texts','rings','arcs','upgradeIntro','reviveTimer','novaFx','impactStop']);
-const states = ['playing','paused','upgrade','loot','relic'];
+const states = ['playing','paused','upgrade','loot','relic','dead'];
 export class SaveConflictError extends Error {}
 
 export function captureRun(game) {
@@ -27,12 +27,17 @@ export function restoreRun(game, snapshot) {
   // Migrate existing version-one saves without discarding their expedition.
   if(!('regionEvent' in d))d.regionEvent=null;
   if(!('nextRegionEvent' in d))d.nextRegionEvent=Math.max(110,(d.distance??0)+90);
-  if(!d || !states.includes(d.state) || !Number.isInteger(d.lives) || d.lives<1 || d.lives>5 || !d.p || d.p.hp<=0 || d.p.maxHp<d.p.hp)invalid();
+  for(const key of ['bombsBought','boostsBought','livesBought','coinsSpent','bombCooldown'])if(!(key in d))d[key]=0;
+  if(!('upgradeSelection' in d))d.upgradeSelection='';
+  if(!('paidRevival' in d))d.paidRevival=false;
+  if(!states.includes(d.state) || !Number.isInteger(d.lives) || d.lives<0 || d.lives>5 || !d.p || d.p.maxHp<d.p.hp)invalid();
+  if(d.state==='dead'?(d.lives!==0||d.p.hp!==0):(d.lives<1||d.p.hp<=0))invalid();
   for(const [key,value] of Object.entries(game)){
     if(omitted.has(key))continue;
     if(!(key in d) || (value!==null && typeof d[key]!==typeof value) || (Array.isArray(value)&&!Array.isArray(d[key])))invalid();
   }
   for(const key of ['time','distance','coins','xp','bossKills','revives','uid'])if(d[key]<0)invalid();
+  for(const key of ['bombsBought','boostsBought','livesBought','coinsSpent'])if(!Number.isSafeInteger(d[key])||d[key]<0)invalid();
   for(const key of ['level','nextXp','damage','interval','threatGrowth'])if(!(d[key]>0))invalid();
   if(!['x','y','hp','maxHp','speed','invuln','face'].every(k=>Number.isFinite(d.p[k])))invalid();
   if(!d.enemies.every(e=>['x','y','hp','maxHp','id','speed','size'].every(k=>Number.isFinite(e[k]))))invalid();
@@ -40,7 +45,9 @@ export function restoreRun(game, snapshot) {
   if(!Array.isArray(snapshot.evolved)||!snapshot.evolved.every(id=>['gatling','blast','storm'].includes(id))||!Array.isArray(snapshot.bullets)||!snapshot.bullets.every(b=>Array.isArray(b.hits)))invalid();
   if(!snapshot.world||!Array.isArray(snapshot.world.used)||!snapshot.world.used.every(Number.isInteger)||!Number.isFinite(snapshot.world.furthest))invalid();
   if(snapshot.bossId!==null&&!d.enemies.some(e=>e.id===snapshot.bossId&&e.isBoss&&e.hp>0))invalid();
-  if(['upgrade','relic'].includes(d.state)&&d.choices.length!==3)invalid();
+  if(d.upgradeSelection && (d.state!=='upgrade'||!game.availableUpgrades.some(u=>u.id===d.upgradeSelection)||!(d.levels[d.upgradeSelection]>0)))invalid();
+  if(d.state==='upgrade'&&d.choices.length!==(d.upgradeSelection?0:3))invalid();
+  if(d.state==='relic'&&d.choices.length!==3)invalid();
   if(['loot','relic'].includes(d.state)&&(!d.lastBoss || typeof d.lastBoss.name!=='string' || !Number.isFinite(d.lastBoss.gold)))invalid();
   // Restore only known fields, then reconnect references and regenerate world chunks.
   for(const key of Object.keys(game))if(!omitted.has(key))game[key]=d[key];

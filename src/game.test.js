@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Game,W,H} from './game.js';
+import {purchasePrice,canPurchase,purchaseCombatSupply} from './combat-purchases.js';
 import {equipmentPrice,canUpgradeEquipment,affordableEquipmentCount} from './armory.js';
 import {captureRun,restoreRun,writeProgress,SaveConflictError} from './run-save.js';
 import {bossRewards} from './bosses.js';
@@ -61,7 +62,7 @@ test('three lives revive twice in place with protection; the third death ends th
   }
   g.p.hp=0;g.resolveDeath();g.resolveDeath();assert.equal(g.lives,0);assert.equal(g.state,'dead');
   assert.equal(events.filter(e=>e==='revive').length,2);assert.equal(events.filter(e=>e==='dead').length,1);
-  assert.equal(captureRun(g),null);
+  assert.equal(restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g)))).state,'dead');
 });
 
 test('boss loot scatters, is collected before rewards, and life drops have a dry-streak guarantee',(t)=>{
@@ -375,4 +376,85 @@ test('armory notifications follow affordability, purchases and maximum equipment
   assert.equal(affordableEquipmentCount(80,[0,1,2,10]),1);assert.equal(affordableEquipmentCount(140,[0,1,2,10]),2);
   assert.equal(affordableEquipmentCount(140-equipmentPrice(0),[1,1,2,10]),0);
   assert.equal(canUpgradeEquipment(10000,10),false);assert.equal(affordableEquipmentCount(10000,[10,10,10,10]),0);
+});
+
+function purchaseFixture(g=isolated(),bank=1000){
+  let raw=null;
+  const storage={getItem:()=>raw,setItem:(_,value)=>{raw=value;}};
+  const profile=writeProgress(storage,{bank,gear:[0,0,0,0]},g);
+  return {g,storage,profile};
+}
+
+test('bought bombs clear armored and splitting enemies, bullets and hazards without spending the free nova',()=>{
+  const {g,storage,profile}=purchaseFixture();g.novaCooldown=8;
+  const armored=g.spawn(0,g.p.x+50,g.p.y);armored.armor=.8;armored.hp=50000;
+  g.spawn(12,g.p.x+70,g.p.y);const far=g.spawn(0,g.p.x,g.p.y+2000);
+  g.enemyShots=[{x:g.p.x,y:g.p.y}];g.hazards=[{x:g.p.x,y:g.p.y}];
+  const result=purchaseCombatSupply(storage,profile,g,'bomb');
+  assert.equal(result.saved.bank,970);assert.equal(g.coinsSpent,30);assert.equal(g.bombsBought,1);
+  assert.equal(g.enemies.filter(e=>e.hp>0).length,1);assert.ok(g.enemies.find(e=>e.id===far.id).hp>0);
+  assert.equal(g.enemyShots.length,0);assert.equal(g.hazards.length,0);assert.equal(g.novaCooldown,8);
+  assert.ok(g.drops.some(d=>d.type==='coin'));assert.ok(g.kills>=4);
+  assert.equal(purchaseCombatSupply(storage,result.saved,g,'bomb'),null);
+  g.updateEffects(.5);assert.equal(purchasePrice(g,'bomb'),50);
+  const next=purchaseCombatSupply(storage,result.saved,g,'bomb');assert.equal(next.saved.bank,920);
+  assert.equal(restoreRun(new Game(),next.saved.run).bombsBought,2);
+});
+
+test('bombs damage and stagger bosses but honor their phase shields',()=>{
+  const {g,storage,profile}=purchaseFixture();g.spawnBoss();let boss=g.boss;const hp=boss.hp;
+  let result=purchaseCombatSupply(storage,profile,g,'bomb');boss=g.boss;
+  assert.ok(Math.abs(boss.hp-hp*.85)<.001);assert.ok(boss.attackClock>=1.2);
+  g.updateEffects(.5);boss.shieldTime=3;const shieldHp=boss.hp;
+  result=purchaseCombatSupply(storage,result.saved,g,'bomb');assert.equal(g.boss.hp,shieldHp);
+  assert.equal(g.state,'playing');assert.equal(g.bossKills,0);
+});
+
+test('chosen upgrades offer one optional additive boost, preserve free continuation and do not scale threat',()=>{
+  const {g,storage,profile}=purchaseFixture();g.xp=g.nextXp;g.checkLevel();g.upgradeIntro=0;
+  const id=g.choices[0].id;assert.equal(g.choose(id,{hold:true}),true);
+  assert.equal(g.state,'upgrade');assert.equal(g.upgradeSelection,id);assert.equal(g.choose(id,{hold:true}),false);
+  const baseline=g.sustainedDps,threat=g.targetThreatGrowth;
+  const result=purchaseCombatSupply(storage,profile,g,'boost');
+  assert.equal(result.saved.bank,940);assert.equal(g.state,'playing');assert.equal(g.damageBonus,20);
+  assert.equal(g.sustainedDps,baseline);assert.equal(g.targetThreatGrowth,threat);
+  const e=g.spawn(0,g.p.x+100,g.p.y);e.hp=1000;g.hit(e,100);assert.equal(e.hp,880);
+  assert.equal(purchaseCombatSupply(storage,result.saved,g,'boost'),null);
+  g.xp=g.nextXp;g.checkLevel();g.upgradeIntro=0;g.choose(g.choices[0].id,{hold:true});
+  const pending=restoreRun(new Game(),JSON.parse(JSON.stringify(captureRun(g))));
+  assert.equal(pending.state,'upgrade');assert.ok(pending.upgradeSelection);assert.equal(pending.choices.length,0);
+  assert.equal(pending.finishUpgrade(),true);assert.equal(pending.damageBonus,20);
+  const second=purchaseCombatSupply(storage,result.saved,g,'boost');assert.equal(second.saved.bank,840);assert.equal(g.damageBonus,40);
+  assert.equal(new Game().damageBonus,0);
+});
+
+test('paid life resumes the same dead run once, persists price and full invulnerability',()=>{
+  const {g,storage,profile}=purchaseFixture();g.lives=1;g.p.hp=0;g.time=87;g.resolveDeath();
+  const deathSave=writeProgress(storage,profile,g),restored=restoreRun(new Game(),deathSave.run);
+  assert.equal(restored.state,'dead');const pos={x:g.p.x,y:g.p.y};
+  const result=purchaseCombatSupply(storage,deathSave,g,'life');
+  assert.equal(result.saved.bank,900);assert.equal(g.lives,1);assert.equal(g.p.hp,g.p.maxHp);assert.equal(g.p.invuln,4);
+  assert.equal(g.p.x,pos.x);assert.equal(g.p.y,pos.y);assert.equal(g.time,87);assert.equal(g.livesBought,1);
+  assert.equal(purchaseCombatSupply(storage,result.saved,g,'life'),null);
+  const next=restoreRun(new Game(),result.saved.run);assert.equal(next.lives,1);assert.equal(purchasePrice(next,'life'),200);
+  for(let i=0;i<20;i++)g.update(.05);assert.equal(g.p.invuln,4);
+});
+
+test('failed, stale, insufficient and wrong-state purchases never charge or mutate the live game',()=>{
+  const {g,storage,profile}=purchaseFixture();const before=JSON.stringify(captureRun(g));
+  assert.equal(canPurchase(g,29,'bomb'),false);assert.equal(purchaseCombatSupply(storage,{...profile,bank:29},g,'bomb'),null);
+  assert.equal(purchaseCombatSupply(storage,profile,g,'life'),null);
+  assert.equal(purchaseCombatSupply(storage,profile,g,'boost'),null);
+  assert.throws(()=>purchaseCombatSupply({...storage,setItem:()=>{throw new Error('disk full');}},profile,g,'bomb'),/disk full/);
+  assert.equal(JSON.stringify(captureRun(g)),before);assert.equal(profile.bank,1000);
+  writeProgress(storage,profile,g);
+  assert.throws(()=>purchaseCombatSupply(storage,profile,g,'bomb'),SaveConflictError);
+  assert.equal(JSON.stringify(captureRun(g)),before);assert.equal(JSON.parse(storage.getItem()).bank,1000);
+});
+
+test('pre-purchase saves migrate and malformed purchase counters are rejected',()=>{
+  const g=isolated(),old=JSON.parse(JSON.stringify(captureRun(g)));
+  for(const key of ['bombsBought','boostsBought','livesBought','coinsSpent','upgradeSelection','bombCooldown','paidRevival'])delete old.data[key];
+  const restored=restoreRun(new Game(),old);assert.equal(restored.damageBonus,0);assert.equal(purchasePrice(restored,'life'),100);
+  old.data.boostsBought=-1;assert.throws(()=>restoreRun(new Game(),old),/存档损坏/);
 });
